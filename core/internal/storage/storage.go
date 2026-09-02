@@ -10,6 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+//go:embed migrations/*.sql
 var migrationsFS embed.FS
 
 type Store struct {
