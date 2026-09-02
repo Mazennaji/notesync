@@ -10,6 +10,7 @@ import (
 	"github.com/Mazennaji/notesync/core/internal/auth"
 	"github.com/Mazennaji/notesync/core/internal/config"
 	"github.com/Mazennaji/notesync/core/internal/ipc"
+	"github.com/Mazennaji/notesync/core/internal/notion"
 	"github.com/Mazennaji/notesync/core/internal/obsidian"
 	"github.com/Mazennaji/notesync/core/internal/storage"
 )
@@ -136,6 +137,40 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		}
 		return ipc.Response{OK: true, Data: map[string]bool{"loggedOut": true}}
 
+	case "notion.pages":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		pages, err := client.SearchPages()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		linked := 0
+		for _, pg := range pages {
+			ok, err := store.LinkNotionPage(pg.Title, pg.ID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			if ok {
+				linked++
+			}
+		}
+		logger.Info("notion pages discovered", "found", len(pages), "linked", linked)
+		return ipc.Response{OK: true, Data: map[string]int{
+			"found": len(pages), "linked": linked,
+		}}
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
 	}
