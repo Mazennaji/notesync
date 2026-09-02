@@ -43,7 +43,24 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		return ipc.Response{OK: true, Data: map[string]string{"message": "pong"}}
 
 	case "status":
-		return ipc.Response{OK: true, Data: map[string]any{"status": "not yet implemented"}}
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+		count, err := store.CountNotes()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		return ipc.Response{OK: true, Data: map[string]any{
+			"vaultPath": cfg.VaultPath,
+			"syncMode":  cfg.SyncMode,
+			"notes":     count,
+		}}
 
 	case "config.validate":
 		cfg, err := decodeConfig(req.Config)
