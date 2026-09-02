@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { callCore } from "./core/client.js";
 import { initCommand } from "./commands/init.js";
-import { scanCommand } from "./commands/scan.js";
+import { authCommand, scanCommand } from "./commands/scan.js";
 import { loadConfig, configExists } from "./config/loader.js"
 
 const program = new Command();
@@ -13,8 +13,9 @@ program
 
 program.command("init").description("Initialize a Notesync configuration")
   .action(initCommand);
-program.command("auth").description("Configure Notion authentication")
-  .action(() => console.log("auth: not yet implemented"));
+program.command("auth")
+  .description("Configure Notion authentication")
+  .action(authCommand);
 program.command("status").description("Display synchronization status")
   .action(async () => {
     const vaultPath = process.cwd();
@@ -40,5 +41,13 @@ program.command("sync").description("Synchronize both directions")
 program.command("scan")
   .description("Discover Markdown notes in the vault")
   .action(scanCommand);
+
+program.command("logout")
+  .description("Remove stored Notion credentials")
+  .action(async () => {
+    const res = await callCore({ command: "auth.logout" });
+    if (!res.ok) { console.error(res.error); process.exit(1); }
+    console.log("Logged out. Notion token removed.");
+  });
 
 program.parse();
