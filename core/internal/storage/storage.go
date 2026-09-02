@@ -98,3 +98,24 @@ func titleFromPath(p string) string {
 	base := path.Base(p)
 	return strings.TrimSuffix(base, path.Ext(base))
 }
+
+func (s *Store) LinkNotionPage(title, pageID string) (bool, error) {
+	res, err := s.DB.Exec(
+		`UPDATE note SET notion_page_id = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE title = ? AND (notion_page_id IS NULL OR notion_page_id = '')`,
+		pageID, title,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *Store) CountLinkedNotes() (int, error) {
+	var n int
+	err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM note WHERE notion_page_id IS NOT NULL AND notion_page_id != ''`,
+	).Scan(&n)
+	return n, err
+}
