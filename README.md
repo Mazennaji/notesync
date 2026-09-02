@@ -708,7 +708,7 @@ This project is licensed under the **MIT License** — see [`LICENSE`](LICENSE) 
 
 **Mazen Naji** — Software Engineer focused on backend systems, software architecture, and AI engineering.
 
-[![GitHub](https://img.shields.io/badge/GitHub-YOUR__USERNAME-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/YOUR_USERNAME)
+[![GitHub](https://img.shields.io/badge/GitHub-Mazennaji-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Mazennaji)
 
 <br />
 
