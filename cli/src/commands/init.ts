@@ -12,7 +12,7 @@ export async function initCommand(): Promise<void> {
     message: "Path to your Obsidian vault",
     placeholder: process.cwd(),
     defaultValue: process.cwd(),
-    validate: (v) => (v.trim() === "" ? "Path is required" : undefined),
+    validate: (v) => (!v || v.trim() === "" ? "Path is required" : undefined),
   });
   if (p.isCancel(vaultInput)) {
     p.cancel("Cancelled.");
