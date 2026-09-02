@@ -14,16 +14,26 @@ export async function initCommand(): Promise<void> {
     defaultValue: process.cwd(),
     validate: (v) => (v.trim() === "" ? "Path is required" : undefined),
   });
-  if (p.isCancel(vaultInput)) return p.cancel("Cancelled.");
+  if (p.isCancel(vaultInput)) {
+    p.cancel("Cancelled.");
+    return;
+  }
 
   const vaultPath = resolve(vaultInput);
 
   if (!(await isDirectory(vaultPath))) {
-    return p.cancel(`Not a directory: ${vaultPath}`);
+    p.cancel(`Not a directory: ${vaultPath}`);
+    return;
   }
+
   if (await configExists(vaultPath)) {
-    const overwrite = await p.confirm({ message: "Config already exists. Overwrite?" });
-    if (p.isCancel(overwrite) || !overwrite) return p.cancel("Cancelled.");
+    const overwrite = await p.confirm({
+      message: "Config already exists. Overwrite?",
+    });
+    if (p.isCancel(overwrite) || !overwrite) {
+      p.cancel("Cancelled.");
+      return;
+    }
   }
 
   const syncMode = await p.select({
@@ -33,7 +43,10 @@ export async function initCommand(): Promise<void> {
       { value: "watch", label: "Watch — sync automatically on changes" },
     ],
   });
-  if (p.isCancel(syncMode)) return p.cancel("Cancelled.");
+  if (p.isCancel(syncMode)) {
+    p.cancel("Cancelled.");
+    return;
+  }
 
   const config: NotesyncConfig = {
     version: CONFIG_VERSION,
@@ -42,12 +55,28 @@ export async function initCommand(): Promise<void> {
     syncMode: syncMode as "manual" | "watch",
   };
 
-  const res = await callCore({
-    command: "config.validate",
-    config: config as unknown as Record<string, unknown>,
-  });
-  if (!res.ok) return p.cancel(`Core rejected config: ${res.error}`);
+  const rawConfig = config as unknown as Record<string, unknown>;
+
+  const s = p.spinner();
+  s.start("Validating configuration");
+  const validateRes = await callCore({ command: "config.validate", config: rawConfig });
+  if (!validateRes.ok) {
+    s.stop("Validation failed");
+    p.cancel(`Core rejected config: ${validateRes.error}`);
+    return;
+  }
 
   await saveConfig(config);
-  p.outro(`Initialized at ${vaultPath}/.notesync/config.json`);
+
+  s.message("Creating state database");
+  const dbRes = await callCore({ command: "db.init", config: rawConfig });
+  if (!dbRes.ok) {
+    s.stop("Database setup failed");
+    p.cancel(`Failed to create state DB: ${dbRes.error}`);
+    return;
+  }
+  s.stop("Ready");
+
+  const dbPath = (dbRes.data as { dbPath: string }).dbPath;
+  p.outro(`Initialized:\n  config: ${vaultPath}/.notesync/config.json\n  state:  ${dbPath}`);
 }
