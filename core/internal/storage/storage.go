@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 var migrationsFS embed.FS
@@ -21,7 +21,7 @@ func Open(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath+"?_foreign_keys=on")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
