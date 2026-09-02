@@ -9,6 +9,7 @@ import (
 
 	"github.com/Mazennaji/notesync/core/internal/config"
 	"github.com/Mazennaji/notesync/core/internal/ipc"
+	"github.com/Mazennaji/notesync/core/internal/obsidian"
 	"github.com/Mazennaji/notesync/core/internal/storage"
 )
 
@@ -70,6 +71,31 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		defer store.Close()
 		logger.Info("state db ready", "path", dbPath)
 		return ipc.Response{OK: true, Data: map[string]string{"dbPath": dbPath}}
+
+	case "vault.scan":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		if err := config.Validate(cfg); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		paths, err := obsidian.Discover(cfg.VaultPath)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "scan failed: " + err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+		added, err := store.UpsertNotes(paths)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		logger.Info("vault scanned", "found", len(paths), "added", added)
+		return ipc.Response{OK: true, Data: map[string]int{
+			"found": len(paths), "added": added}}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
