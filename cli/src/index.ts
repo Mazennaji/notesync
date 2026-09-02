@@ -3,6 +3,7 @@ import { callCore } from "./core/client.js";
 import { initCommand } from "./commands/init.js";
 import { authCommand, scanCommand } from "./commands/scan.js";
 import { loadConfig, configExists } from "./config/loader.js"
+import { pagesCommand } from "./commands/pages.js";
 
 const program = new Command();
 
@@ -50,4 +51,7 @@ program.command("logout")
     console.log("Logged out. Notion token removed.");
   });
 
+program.command("pages")
+  .description("Discover Notion pages and link them to vault notes")
+  .action(pagesCommand);
 program.parse();
