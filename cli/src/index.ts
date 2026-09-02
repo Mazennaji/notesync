@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { callCore } from "./core/client.js";
 
 const program = new Command();
 
@@ -12,7 +13,11 @@ program.command("init").description("Initialize a Notesync configuration")
 program.command("auth").description("Configure Notion authentication")
   .action(() => console.log("auth: not yet implemented"));
 program.command("status").description("Display synchronization status")
-  .action(() => console.log("status: not yet implemented"));
+  .action(async () => {
+    const res = await callCore({ command: "status" });
+    if (!res.ok) { program.error(`Error: ${res.error}`); }
+    console.log(res.data);
+  });
 program.command("sync").description("Synchronize both directions")
   .option("--dry-run", "Preview without modifying data")
   .action((opts) => console.log("sync: not yet implemented", opts));
