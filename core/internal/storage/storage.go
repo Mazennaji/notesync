@@ -5,7 +5,9 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -51,4 +53,48 @@ func (s *Store) migrate() error {
 
 func (s *Store) Close() error {
 	return s.DB.Close()
+}
+
+func (s *Store) UpsertNotes(paths []string) (int, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(
+		`INSERT INTO note (local_path, title) VALUES (?, ?)
+		 ON CONFLICT(local_path) DO NOTHING`,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	added := 0
+	for _, p := range paths {
+		res, err := stmt.Exec(p, titleFromPath(p))
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			added++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return added, nil
+}
+
+func (s *Store) CountNotes() (int, error) {
+	var n int
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM note`).Scan(&n)
+	return n, err
+}
+
+func titleFromPath(p string) string {
+	base := path.Base(p)
+	return strings.TrimSuffix(base, path.Ext(base))
 }
