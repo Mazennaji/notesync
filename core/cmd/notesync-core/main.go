@@ -5,9 +5,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/Mazennaji/notesync/core/internal/config"
 	"github.com/Mazennaji/notesync/core/internal/ipc"
+	"github.com/Mazennaji/notesync/core/internal/storage"
 )
 
 func main() {
@@ -51,6 +53,23 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
 		return ipc.Response{OK: true, Data: map[string]bool{"valid": true}}
+
+	case "db.init":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		if err := config.Validate(cfg); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		dbPath := filepath.Join(cfg.VaultPath, ".notesync", "state.db")
+		store, err := storage.Open(dbPath)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+		logger.Info("state db ready", "path", dbPath)
+		return ipc.Response{OK: true, Data: map[string]string{"dbPath": dbPath}}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
