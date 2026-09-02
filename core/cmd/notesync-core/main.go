@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Mazennaji/notesync/core/internal/auth"
 	"github.com/Mazennaji/notesync/core/internal/config"
 	"github.com/Mazennaji/notesync/core/internal/ipc"
 	"github.com/Mazennaji/notesync/core/internal/obsidian"
@@ -113,6 +114,27 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		logger.Info("vault scanned", "found", len(paths), "added", added)
 		return ipc.Response{OK: true, Data: map[string]int{
 			"found": len(paths), "added": added}}
+
+	case "auth.store":
+		token, _ := req.Args["token"].(string)
+		name, err := auth.Store(token)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		logger.Info("notion authenticated", "integration", name)
+		return ipc.Response{OK: true, Data: map[string]string{"integration": name}}
+
+	case "auth.status":
+		if _, err := auth.Get(); err != nil {
+			return ipc.Response{OK: true, Data: map[string]bool{"authenticated": false}}
+		}
+		return ipc.Response{OK: true, Data: map[string]bool{"authenticated": true}}
+
+	case "auth.logout":
+		if err := auth.Delete(); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		return ipc.Response{OK: true, Data: map[string]bool{"loggedOut": true}}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
