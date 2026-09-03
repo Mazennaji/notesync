@@ -679,6 +679,73 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			"remote": remoteMD,
 		}}
 
+	case "conflicts.resolve":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		conflictID := int64(toFloat(req.Args["conflictId"]))
+		noteID := int64(toFloat(req.Args["noteId"]))
+		choice, _ := req.Args["choice"].(string)
+
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		note, err := store.NoteByID(noteID)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		switch choice {
+		case "local":
+			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(note.LocalPath)))
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			blocks, err := markdown.Parse(raw)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			if err := client.UpdatePageContent(note.NotionPageID, blocks); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			echoed, _ := client.FetchMarkdown(note.NotionPageID)
+			h := sync.Hash(string(raw))
+			_ = store.RecordSync(note.ID, h, sync.Hash(echoed), h, "synced")
+			_ = store.LogHistory(note.ID, "resolve", "local_to_remote", "success", h, sync.Hash(echoed), "kept local")
+
+		case "remote":
+			remoteMD, err := client.FetchMarkdown(note.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			target := filepath.Join(cfg.VaultPath, filepath.FromSlash(note.LocalPath))
+			if err := os.WriteFile(target, []byte(remoteMD), 0o644); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			h := sync.Hash(remoteMD)
+			_ = store.RecordSync(note.ID, h, h, h, "synced")
+			_ = store.LogHistory(note.ID, "resolve", "remote_to_local", "success", h, h, "kept remote")
+
+		case "skip":
+			return ipc.Response{OK: true, Data: map[string]string{"resolved": "skipped"}}
+
+		default:
+			return ipc.Response{OK: false, Error: "unknown choice: " + choice}
+		}
+
+		if err := store.ResolveConflict(conflictID, choice); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		return ipc.Response{OK: true, Data: map[string]string{"resolved": choice}}
+
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
 	}
