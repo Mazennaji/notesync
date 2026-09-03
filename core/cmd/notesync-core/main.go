@@ -15,6 +15,7 @@ import (
 	"github.com/Mazennaji/notesync/core/internal/notion"
 	"github.com/Mazennaji/notesync/core/internal/obsidian"
 	"github.com/Mazennaji/notesync/core/internal/storage"
+	"github.com/Mazennaji/notesync/core/internal/sync"
 )
 
 func main() {
@@ -265,6 +266,59 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		}
 		logger.Info("notion push complete", "pushed", pushed)
 		return ipc.Response{OK: true, Data: map[string]int{"pushed": pushed}}
+
+	case "sync.diff":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		linked, err := store.LinkedNotes()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		var decisions []map[string]string
+		counts := map[string]int{}
+		for _, n := range linked {
+			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("reading %s: %v", n.LocalPath, err)}
+			}
+			localHash := sync.Hash(string(raw))
+
+			remoteMD, err := client.FetchMarkdown(n.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("fetching %s: %v", n.Title, err)}
+			}
+			remoteHash := sync.Hash(remoteMD)
+
+			lastSynced, err := store.LastSyncedHash(n.ID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+
+			d := sync.Classify(n.LocalPath, localHash, remoteHash, lastSynced)
+			counts[string(d.Action)]++
+			decisions = append(decisions, map[string]string{
+				"note":   d.NotePath,
+				"action": string(d.Action),
+			})
+		}
+
+		return ipc.Response{OK: true, Data: map[string]any{
+			"decisions": decisions,
+			"counts":    counts,
+		}}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
