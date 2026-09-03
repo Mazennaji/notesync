@@ -188,3 +188,36 @@ func (s *Store) LastSyncedHash(noteID int64) (string, error) {
 	}
 	return h, nil
 }
+
+func (s *Store) RecordSync(noteID int64, localHash, remoteHash, syncedHash, status string) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO sync_state
+		   (note_id, local_hash, remote_hash, last_synced_hash, sync_status, last_synced_at)
+		 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(note_id) DO UPDATE SET
+		   local_hash       = excluded.local_hash,
+		   remote_hash      = excluded.remote_hash,
+		   last_synced_hash = excluded.last_synced_hash,
+		   sync_status      = excluded.sync_status,
+		   last_synced_at   = CURRENT_TIMESTAMP`,
+		noteID, localHash, remoteHash, syncedHash, status,
+	)
+	return err
+}
+
+func (s *Store) LogHistory(noteID int64, operation, direction, status, localHash, remoteHash, errMsg string) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO sync_history
+		   (note_id, operation, direction, status, local_hash, remote_hash, error_message)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		noteID, operation, direction, status, localHash, remoteHash, nullify(errMsg),
+	)
+	return err
+}
+
+func nullify(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
