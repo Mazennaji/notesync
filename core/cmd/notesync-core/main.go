@@ -649,6 +649,36 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		}
 		return ipc.Response{OK: true, Data: map[string]any{"conflicts": out}}
 
+	case "conflicts.preview":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		noteID := int64(toFloat(req.Args["noteId"]))
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		note, err := store.NoteByID(noteID)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		localBytes, _ := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(note.LocalPath)))
+		remoteMD, err := client.FetchMarkdown(note.NotionPageID)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		return ipc.Response{OK: true, Data: map[string]string{
+			"local":  string(localBytes),
+			"remote": remoteMD,
+		}}
+
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
 	}
