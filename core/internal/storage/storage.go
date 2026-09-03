@@ -32,6 +32,17 @@ type State struct {
 	LastSyncedHash string
 }
 
+type Conflict struct {
+	ID           int64
+	NoteID       int64
+	LocalPath    string
+	Title        string
+	NotionPageID string
+	LocalHash    string
+	RemoteHash   string
+	DetectedAt   string
+}
+
 func (s *Store) UnlinkedNotes() ([]Note, error) {
 	rows, err := s.DB.Query(
 		`SELECT id, local_path, title FROM note
@@ -304,4 +315,45 @@ func (s *Store) SetRemoteDeleted(noteID int64) error {
 		`INSERT INTO sync_state (note_id, remote_deleted) VALUES (?, 1)
 		 ON CONFLICT(note_id) DO UPDATE SET remote_deleted = 1`, noteID)
 	return err
+}
+
+func (s *Store) UnresolvedConflicts() ([]Conflict, error) {
+	rows, err := s.DB.Query(
+		`SELECT c.id, c.note_id, n.local_path, n.title, n.notion_page_id,
+		        COALESCE(c.local_hash,''), COALESCE(c.remote_hash,''), c.detected_at
+		 FROM conflict c
+		 JOIN note n ON n.id = c.note_id
+		 WHERE c.status = 'unresolved'
+		 ORDER BY c.detected_at`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Conflict
+	for rows.Next() {
+		var c Conflict
+		if err := rows.Scan(&c.ID, &c.NoteID, &c.LocalPath, &c.Title,
+			&c.NotionPageID, &c.LocalHash, &c.RemoteHash, &c.DetectedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ResolveConflict(conflictID int64, resolution string) error {
+	_, err := s.DB.Exec(
+		`UPDATE conflict SET status = 'resolved', resolution = ?, resolved_at = CURRENT_TIMESTAMP
+		 WHERE id = ?`,
+		resolution, conflictID,
+	)
+	return err
+}
+
+func (s *Store) CountUnresolvedConflicts() (int, error) {
+	var n int
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM conflict WHERE status = 'unresolved'`).Scan(&n)
+	return n, err
 }
