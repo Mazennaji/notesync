@@ -41,9 +41,9 @@ program.command("status").description("Display synchronization status")
     console.log(`Mode:   ${d.syncMode}`);
     console.log(`Notes:  ${d.notes}`);
   });
-program.command("sync").description("Synchronize both directions")
-  .option("--dry-run", "Preview without modifying data")
-  .action((opts) => console.log("sync: not yet implemented", opts));
+program.command("sync")
+  .description("Synchronize both directions")
+  .action(syncCommand);
 
 program.command("scan")
   .description("Discover Markdown notes in the vault")
