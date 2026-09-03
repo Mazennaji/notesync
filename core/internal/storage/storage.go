@@ -357,3 +357,12 @@ func (s *Store) CountUnresolvedConflicts() (int, error) {
 	err := s.DB.QueryRow(`SELECT COUNT(*) FROM conflict WHERE status = 'unresolved'`).Scan(&n)
 	return n, err
 }
+
+func (s *Store) NoteByID(id int64) (Note, error) {
+	var n Note
+	err := s.DB.QueryRow(
+		`SELECT id, local_path, title, COALESCE(notion_page_id,'') FROM note WHERE id = ?`,
+		id,
+	).Scan(&n.ID, &n.LocalPath, &n.Title, &n.NotionPageID)
+	return n, err
+}

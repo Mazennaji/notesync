@@ -778,12 +778,3 @@ func toFloat(v any) float64 {
 	f, _ := v.(float64)
 	return f
 }
-
-func (s *Store) NoteByID(id int64) (Note, error) {
-	var n Note
-	err := s.DB.QueryRow(
-		`SELECT id, local_path, title, COALESCE(notion_page_id,'') FROM note WHERE id = ?`,
-		id,
-	).Scan(&n.ID, &n.LocalPath, &n.Title, &n.NotionPageID)
-	return n, err
-}
