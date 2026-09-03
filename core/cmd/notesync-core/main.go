@@ -299,6 +299,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			if err := store.RecordSync(n.ID, localHash, canonicalRemote, localHash, "synced"); err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
+			_ = store.RecordSyncContent(n.ID, string(raw))
 			_ = store.LogHistory(n.ID, "push", "local_to_remote", "success", localHash, canonicalRemote, "")
 			pushed++
 		}
@@ -361,6 +362,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			if err := store.RecordSync(n.ID, remoteHash, remoteHash, remoteHash, "synced"); err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
+			_ = store.RecordSyncContent(n.ID, remoteMD)
 			_ = store.LogHistory(n.ID, "pull", "remote_to_local", "success", remoteHash, remoteHash, "")
 			pulled++
 		}
@@ -495,6 +497,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 				if err := store.RecordSync(n.ID, localHash, canonicalRemote, localHash, "synced"); err != nil {
 					return ipc.Response{OK: false, Error: err.Error()}
 				}
+				_ = store.RecordSyncContent(n.ID, string(raw))
 				_ = store.LogHistory(n.ID, "sync", "local_to_remote", "success", localHash, canonicalRemote, "")
 				pushed++
 
@@ -511,6 +514,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 				if err := store.RecordSync(n.ID, remoteHash, remoteHash, remoteHash, "synced"); err != nil {
 					return ipc.Response{OK: false, Error: err.Error()}
 				}
+				_ = store.RecordSyncContent(n.ID, remoteMD)
 				_ = store.LogHistory(n.ID, "sync", "remote_to_local", "success", remoteHash, remoteHash, "")
 				pulled++
 
@@ -720,6 +724,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			echoed, _ := client.FetchMarkdown(note.NotionPageID)
 			h := sync.Hash(string(raw))
 			_ = store.RecordSync(note.ID, h, sync.Hash(echoed), h, "synced")
+			_ = store.RecordSyncContent(note.ID, string(raw))
 			_ = store.LogHistory(note.ID, "resolve", "local_to_remote", "success", h, sync.Hash(echoed), "kept local")
 
 		case "remote":
@@ -733,6 +738,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			}
 			h := sync.Hash(remoteMD)
 			_ = store.RecordSync(note.ID, h, h, h, "synced")
+			_ = store.RecordSyncContent(note.ID, remoteMD)
 			_ = store.LogHistory(note.ID, "resolve", "remote_to_local", "success", h, h, "kept remote")
 
 		case "skip":
@@ -746,6 +752,66 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
 		return ipc.Response{OK: true, Data: map[string]string{"resolved": choice}}
+
+	case "conflicts.merge":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		conflictID := int64(toFloat(req.Args["conflictId"]))
+		noteID := int64(toFloat(req.Args["noteId"]))
+
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		note, err := store.NoteByID(noteID)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		localBytes, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(note.LocalPath)))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		remoteMD, err := client.FetchMarkdown(note.NotionPageID)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		base, _ := store.BaseContent(noteID)
+
+		result := sync.Merge(base, string(localBytes), remoteMD)
+
+		target := filepath.Join(cfg.VaultPath, filepath.FromSlash(note.LocalPath))
+		if err := os.WriteFile(target, []byte(result.Merged), 0o644); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		if result.Conflict {
+			_ = store.LogHistory(noteID, "merge", "three_way", "partial", "", "", "merge left conflict markers")
+			return ipc.Response{OK: true, Data: map[string]any{"merged": true, "clean": false}}
+		}
+
+		blocks, err := markdown.Parse([]byte(result.Merged))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		if err := client.UpdatePageContent(note.NotionPageID, blocks); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		echoed, _ := client.FetchMarkdown(note.NotionPageID)
+		h := sync.Hash(result.Merged)
+		_ = store.RecordSync(noteID, h, sync.Hash(echoed), h, "synced")
+		_ = store.RecordSyncContent(noteID, result.Merged)
+		_ = store.ResolveConflict(conflictID, "merge")
+		_ = store.LogHistory(noteID, "merge", "three_way", "success", h, sync.Hash(echoed), "clean merge")
+
+		return ipc.Response{OK: true, Data: map[string]any{"merged": true, "clean": true}}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
@@ -769,12 +835,12 @@ func fileExistsAt(path string) bool {
 	return err == nil
 }
 
-func fail(l *slog.Logger, msg string) {
-	l.Error(msg)
-	_ = json.NewEncoder(os.Stdout).Encode(ipc.Response{OK: false, Error: msg})
-}
-
 func toFloat(v any) float64 {
 	f, _ := v.(float64)
 	return f
+}
+
+func fail(l *slog.Logger, msg string) {
+	l.Error(msg)
+	_ = json.NewEncoder(os.Stdout).Encode(ipc.Response{OK: false, Error: msg})
 }
