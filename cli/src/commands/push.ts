@@ -24,6 +24,6 @@ export async function pushCommand(): Promise<void> {
     process.exit(1);
   }
 
-  const { pushed } = res.data as { pushed: number };
-  s.stop(`Pushed content for ${pushed} note(s)`);
+  const { pushed, skipped } = res.data as { pushed: number; skipped: number };
+  s.stop(`Pushed ${pushed} note(s), skipped ${skipped} unchanged`);
 }
