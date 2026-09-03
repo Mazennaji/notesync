@@ -249,23 +249,47 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
 
-		pushed := 0
+		pushed, skipped := 0, 0
 		for _, n := range linked {
 			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
 			if err != nil {
 				return ipc.Response{OK: false, Error: fmt.Sprintf("reading %s: %v", n.LocalPath, err)}
 			}
+			localHash := sync.Hash(string(raw))
+
+			remoteMD, err := client.FetchMarkdown(n.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("fetching %s: %v", n.Title, err)}
+			}
+			remoteHash := sync.Hash(remoteMD)
+
+			lastSynced, _ := store.LastSyncedHash(n.ID)
+			d := sync.Classify(n.LocalPath, localHash, remoteHash, lastSynced)
+
+			if d.Action != sync.Push && d.Action != sync.NewLocal {
+				skipped++
+				continue
+			}
+
 			blocks, err := markdown.Parse(raw)
 			if err != nil {
+				_ = store.LogHistory(n.ID, "push", "local_to_remote", "error", localHash, remoteHash, err.Error())
 				return ipc.Response{OK: false, Error: fmt.Sprintf("parsing %s: %v", n.LocalPath, err)}
 			}
 			if err := client.UpdatePageContent(n.NotionPageID, blocks); err != nil {
+				_ = store.LogHistory(n.ID, "push", "local_to_remote", "error", localHash, remoteHash, err.Error())
 				return ipc.Response{OK: false, Error: fmt.Sprintf("pushing %s: %v", n.LocalPath, err)}
 			}
+
+			if err := store.RecordSync(n.ID, localHash, localHash, localHash, "synced"); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			_ = store.LogHistory(n.ID, "push", "local_to_remote", "success", localHash, localHash, "")
 			pushed++
 		}
-		logger.Info("notion push complete", "pushed", pushed)
-		return ipc.Response{OK: true, Data: map[string]int{"pushed": pushed}}
+
+		logger.Info("push complete", "pushed", pushed, "skipped", skipped)
+		return ipc.Response{OK: true, Data: map[string]int{"pushed": pushed, "skipped": skipped}}
 
 	case "sync.diff":
 		cfg, err := decodeConfig(req.Config)
