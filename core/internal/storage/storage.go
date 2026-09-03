@@ -245,3 +245,12 @@ func (s *Store) ResetSyncState() error {
 	_, err := s.DB.Exec(`DELETE FROM sync_state`)
 	return err
 }
+
+func (s *Store) RecordConflict(noteID int64, localHash, remoteHash string) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO conflict (note_id, local_hash, remote_hash, status)
+		 VALUES (?, ?, ?, 'unresolved')`,
+		noteID, localHash, remoteHash,
+	)
+	return err
+}
