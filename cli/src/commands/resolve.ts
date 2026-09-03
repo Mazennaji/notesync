@@ -58,6 +58,7 @@ export async function resolveCommand(): Promise<void> {
     const choice = await p.select({
       message: "How should this be resolved?",
       options: [
+        { value: "merge", label: "Merge — combine both (markers if they overlap)" },
         { value: "local", label: "Keep local — overwrite Notion" },
         { value: "remote", label: "Keep remote — overwrite local file" },
         { value: "skip", label: "Skip — decide later" },
@@ -67,6 +68,30 @@ export async function resolveCommand(): Promise<void> {
     if (p.isCancel(choice)) {
       p.cancel("Stopped. Remaining conflicts left unresolved.");
       return;
+    }
+
+    if (choice === "merge") {
+      const mergeRes = await callCore({
+        command: "conflicts.merge",
+        config: rawConfig,
+        args: { conflictId: Number(c.id), noteId: Number(c.noteId) },
+      });
+      if (!mergeRes.ok) {
+        p.log.error(`Merge failed for ${c.note}: ${mergeRes.error}`);
+        continue;
+      }
+      const { clean } = mergeRes.data as { clean: boolean };
+      if (clean) {
+        p.log.success(`Merged ${c.note} cleanly.`);
+        resolved++;
+      } else {
+        p.log.warn(
+          `${c.note}: overlapping edits — conflict markers written to the file. ` +
+            "Edit them out, then run resolve again and choose Keep local.",
+        );
+        skipped++;
+      }
+      continue;
     }
 
     const applyRes = await callCore({
