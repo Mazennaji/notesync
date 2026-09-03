@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -188,6 +189,43 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
 		return ipc.Response{OK: true, Data: map[string]string{"parentId": parentID}}
+
+	case "notion.create":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		if cfg.NotionParentID == "" {
+			return ipc.Response{OK: false, Error: "no parent page set (run `notesync parent`)"}
+		}
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		unlinked, err := store.UnlinkedNotes()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		created := 0
+		for _, n := range unlinked {
+			pageID, err := client.CreatePage(cfg.NotionParentID, n.Title)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("creating %q: %v", n.Title, err)}
+			}
+			if err := store.SetNotionPageID(n.ID, pageID); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			created++
+		}
+		logger.Info("notion pages created", "created", created)
+		return ipc.Response{OK: true, Data: map[string]int{"created": created}}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
