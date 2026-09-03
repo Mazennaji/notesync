@@ -77,6 +77,11 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("apply 002: %w", err)
 		}
 	}
+	if !s.columnExists("sync_state", "last_synced_content") {
+		if _, err := s.DB.Exec(mustRead("migrations/003_base_content.sql")); err != nil {
+			return fmt.Errorf("apply 003: %w", err)
+		}
+	}
 	return nil
 }
 
