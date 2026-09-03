@@ -3,6 +3,7 @@ package notion
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Mazennaji/notesync/core/internal/markdown"
 )
@@ -193,4 +194,26 @@ func (c *Client) appendChildren(pageID string, blocks []map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) PageArchived(pageID string) (bool, error) {
+	data, err := c.do("GET", "/pages/"+pageID, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			return true, nil
+		}
+		return false, err
+	}
+	var p struct {
+		Archived bool `json:"archived"`
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		return false, err
+	}
+	return p.Archived, nil
+}
+
+func (c *Client) ArchivePage(pageID string) error {
+	_, err := c.do("PATCH", "/pages/"+pageID, map[string]any{"archived": true})
+	return err
 }
