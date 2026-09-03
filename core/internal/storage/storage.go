@@ -19,6 +19,42 @@ type Store struct {
 	DB *sql.DB
 }
 
+type Note struct {
+	ID           int64
+	LocalPath    string
+	Title        string
+	NotionPageID string
+}
+
+func (s *Store) UnlinkedNotes() ([]Note, error) {
+	rows, err := s.DB.Query(
+		`SELECT id, local_path, title FROM note
+		 WHERE notion_page_id IS NULL OR notion_page_id = ''`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []Note
+	for rows.Next() {
+		var n Note
+		if err := rows.Scan(&n.ID, &n.LocalPath, &n.Title); err != nil {
+			return nil, err
+		}
+		notes = append(notes, n)
+	}
+	return notes, rows.Err()
+}
+
+func (s *Store) SetNotionPageID(noteID int64, pageID string) error {
+	_, err := s.DB.Exec(
+		`UPDATE note SET notion_page_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		pageID, noteID,
+	)
+	return err
+}
+
 func Open(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
