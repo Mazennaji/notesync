@@ -155,3 +155,24 @@ func (s *Store) CountLinkedNotes() (int, error) {
 	).Scan(&n)
 	return n, err
 }
+
+func (s *Store) LinkedNotes() ([]Note, error) {
+	rows, err := s.DB.Query(
+		`SELECT id, local_path, title, notion_page_id FROM note
+		 WHERE notion_page_id IS NOT NULL AND notion_page_id != ''`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []Note
+	for rows.Next() {
+		var n Note
+		if err := rows.Scan(&n.ID, &n.LocalPath, &n.Title, &n.NotionPageID); err != nil {
+			return nil, err
+		}
+		notes = append(notes, n)
+	}
+	return notes, rows.Err()
+}
