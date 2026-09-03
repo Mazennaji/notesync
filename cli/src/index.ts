@@ -8,6 +8,7 @@ import { parentCommand } from "./commands/parent.js";
 import { createCommand } from "./commands/create.js";
 import { pushCommand } from "./commands/push.js";
 import { diffCommand } from "./commands/diff.js";
+import { pullCommand } from "./commands/pull.js";
 
 const program = new Command();
 
@@ -74,4 +75,8 @@ program.command("push")
 program.command("diff")
   .description("Show what would be synchronized (read-only)")
   .action(diffCommand);
+
+program.command("pull")
+  .description("Pull note content from Notion into the vault")
+  .action(pullCommand);
 program.parse();
