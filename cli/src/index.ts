@@ -4,6 +4,8 @@ import { initCommand } from "./commands/init.js";
 import { authCommand, scanCommand } from "./commands/scan.js";
 import { loadConfig, configExists } from "./config/loader.js"
 import { pagesCommand } from "./commands/pages.js";
+import { parentCommand } from "./commands/parent.js";
+import { createCommand } from "./commands/create.js";
 
 const program = new Command();
 
@@ -54,4 +56,13 @@ program.command("logout")
 program.command("pages")
   .description("Discover Notion pages and link them to vault notes")
   .action(pagesCommand);
+
+program.command("parent")
+  .description("Set the Notion parent page for new notes")
+  .action(parentCommand);
+
+program.command("create")
+  .description("Create Notion pages for notes not yet linked")
+  .action(createCommand);
+  
 program.parse();
