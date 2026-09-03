@@ -623,6 +623,32 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		}
 		return ipc.Response{OK: true, Data: map[string]bool{"reset": true}}
 
+	case "conflicts.list":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		conflicts, err := store.UnresolvedConflicts()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		var out []map[string]string
+		for _, c := range conflicts {
+			out = append(out, map[string]string{
+				"id":         fmt.Sprintf("%d", c.ID),
+				"note":       c.LocalPath,
+				"detectedAt": c.DetectedAt,
+			})
+		}
+		return ipc.Response{OK: true, Data: map[string]any{"conflicts": out}}
+
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
 	}
