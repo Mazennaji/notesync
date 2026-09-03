@@ -43,6 +43,7 @@ program.command("status").description("Display synchronization status")
   });
 program.command("sync")
   .description("Synchronize both directions")
+  .option("--dry-run", "Preview changes without applying them")
   .action(syncCommand);
 
 program.command("scan")
