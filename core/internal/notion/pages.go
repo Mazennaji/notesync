@@ -27,6 +27,49 @@ type searchResponse struct {
 	HasMore    bool              `json:"has_more"`
 }
 
+type createPageRequest struct {
+	Parent     pageParent               `json:"parent"`
+	Properties map[string]titleProperty `json:"properties"`
+}
+
+type pageParent struct {
+	PageID string `json:"page_id"`
+}
+
+type titleProperty struct {
+	Title []richText `json:"title"`
+}
+
+type richText struct {
+	Text textContent `json:"text"`
+}
+
+type textContent struct {
+	Content string `json:"content"`
+}
+
+func (c *Client) CreatePage(parentID, title string) (string, error) {
+	body := createPageRequest{
+		Parent: pageParent{PageID: parentID},
+		Properties: map[string]titleProperty{
+			"title": {Title: []richText{{Text: textContent{Content: title}}}},
+		},
+	}
+
+	data, err := c.do("POST", "/pages", body)
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
 func (c *Client) SearchPages() ([]Page, error) {
 	var pages []Page
 	cursor := ""
