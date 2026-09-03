@@ -10,6 +10,8 @@ import { pushCommand } from "./commands/push.js";
 import { diffCommand } from "./commands/diff.js";
 import { pullCommand } from "./commands/pull.js";
 import { syncCommand } from "./commands/sync.js";
+import { conflictsCommand } from "./commands/conflicts.js";
+import { resolveCommand } from "./commands/resolve.js";
 
 const program = new Command();
 
@@ -82,5 +84,13 @@ program.command("diff")
 program.command("pull")
   .description("Pull note content from Notion into the vault")
   .action(pullCommand);
+
+program.command("conflicts")
+  .description("List unresolved synchronization conflicts")
+  .action(conflictsCommand);
+
+program.command("resolve")
+  .description("Interactively resolve conflicts")
+  .action(resolveCommand);
 
 program.parse();
