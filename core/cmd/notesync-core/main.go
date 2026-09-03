@@ -374,6 +374,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
 		}
 		dryRun, _ := req.Args["dryRun"].(bool)
+		doDelete, _ := req.Args["delete"].(bool)
 		client, err := notion.New()
 		if err != nil {
 			return ipc.Response{OK: false, Error: err.Error()}
@@ -390,7 +391,68 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		}
 
 		pushed, pulled, conflicts, skipped := 0, 0, 0, 0
+		deletedLocal, deletedRemote, deletePending := 0, 0, 0
+		var live []storage.Note
+
 		for _, n := range linked {
+			localPath := filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath))
+			localGone := !fileExistsAt(localPath)
+
+			remoteGone, err := client.PageArchived(n.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("checking %s: %v", n.Title, err)}
+			}
+
+			switch {
+			case localGone && remoteGone:
+				if !dryRun {
+					_ = store.MarkNoteDeleted(n.ID)
+					_ = store.LogHistory(n.ID, "delete", "both", "success", "", "", "both sides deleted")
+				}
+				deletedLocal++
+				continue
+
+			case localGone && !remoteGone:
+				if !doDelete {
+					if !dryRun {
+						_ = store.SetLocalDeleted(n.ID)
+					}
+					deletePending++
+					continue
+				}
+				if !dryRun {
+					if err := client.ArchivePage(n.NotionPageID); err != nil {
+						return ipc.Response{OK: false, Error: fmt.Sprintf("archiving %s: %v", n.Title, err)}
+					}
+					_ = store.MarkNoteDeleted(n.ID)
+					_ = store.LogHistory(n.ID, "delete", "local_to_remote", "success", "", "", "local deleted, page archived")
+				}
+				deletedRemote++
+				continue
+
+			case !localGone && remoteGone:
+				if !doDelete {
+					if !dryRun {
+						_ = store.SetRemoteDeleted(n.ID)
+					}
+					deletePending++
+					continue
+				}
+				if !dryRun {
+					if err := obsidian.Trash(cfg.VaultPath, n.LocalPath); err != nil {
+						return ipc.Response{OK: false, Error: fmt.Sprintf("trashing %s: %v", n.LocalPath, err)}
+					}
+					_ = store.MarkNoteDeleted(n.ID)
+					_ = store.LogHistory(n.ID, "delete", "remote_to_local", "success", "", "", "page archived, file trashed")
+				}
+				deletedLocal++
+				continue
+			}
+
+			live = append(live, n)
+		}
+
+		for _, n := range live {
 			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
 			if err != nil {
 				return ipc.Response{OK: false, Error: fmt.Sprintf("reading %s: %v", n.LocalPath, err)}
@@ -468,9 +530,13 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			}
 		}
 
-		logger.Info("sync complete", "dryRun", dryRun, "pushed", pushed, "pulled", pulled, "conflicts", conflicts, "skipped", skipped)
+		logger.Info("sync complete", "dryRun", dryRun, "delete", doDelete,
+			"pushed", pushed, "pulled", pulled, "conflicts", conflicts, "skipped", skipped,
+			"deletedLocal", deletedLocal, "deletedRemote", deletedRemote, "deletePending", deletePending)
 		return ipc.Response{OK: true, Data: map[string]any{
-			"dryRun": dryRun, "pushed": pushed, "pulled": pulled, "conflicts": conflicts, "skipped": skipped,
+			"dryRun": dryRun, "delete": doDelete,
+			"pushed": pushed, "pulled": pulled, "conflicts": conflicts, "skipped": skipped,
+			"deletedLocal": deletedLocal, "deletedRemote": deletedRemote, "deletePending": deletePending,
 		}}
 
 	case "sync.diff":
@@ -496,11 +562,27 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		var decisions []map[string]string
 		counts := map[string]int{}
 		for _, n := range linked {
-			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
+			localPath := filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath))
+			if !fileExistsAt(localPath) {
+				counts["deleted_local"]++
+				decisions = append(decisions, map[string]string{"note": n.LocalPath, "action": "deleted_local"})
+				continue
+			}
+			raw, err := os.ReadFile(localPath)
 			if err != nil {
 				return ipc.Response{OK: false, Error: fmt.Sprintf("reading %s: %v", n.LocalPath, err)}
 			}
 			localHash := sync.Hash(string(raw))
+
+			remoteGone, err := client.PageArchived(n.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("checking %s: %v", n.Title, err)}
+			}
+			if remoteGone {
+				counts["deleted_remote"]++
+				decisions = append(decisions, map[string]string{"note": n.LocalPath, "action": "deleted_remote"})
+				continue
+			}
 
 			remoteMD, err := client.FetchMarkdown(n.NotionPageID)
 			if err != nil {
@@ -556,6 +638,11 @@ func decodeConfig(raw map[string]any) (config.Config, error) {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+func fileExistsAt(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func fail(l *slog.Logger, msg string) {
