@@ -6,6 +6,7 @@ import { loadConfig, configExists } from "./config/loader.js"
 import { pagesCommand } from "./commands/pages.js";
 import { parentCommand } from "./commands/parent.js";
 import { createCommand } from "./commands/create.js";
+import { pushCommand } from "./commands/push.js";
 
 const program = new Command();
 
@@ -65,4 +66,8 @@ program.command("create")
   .description("Create Notion pages for notes not yet linked")
   .action(createCommand);
   
+program.command("push")
+  .description("Push local note content to Notion")
+  .action(pushCommand);
+
 program.parse();
