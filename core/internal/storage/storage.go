@@ -281,3 +281,27 @@ func (s *Store) RecordConflict(noteID int64, localHash, remoteHash string) error
 	)
 	return err
 }
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (s *Store) MarkNoteDeleted(noteID int64) error {
+	_, err := s.DB.Exec(`UPDATE note SET deleted = 1 WHERE id = ?`, noteID)
+	return err
+}
+
+func (s *Store) SetLocalDeleted(noteID int64) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO sync_state (note_id, local_deleted) VALUES (?, 1)
+		 ON CONFLICT(note_id) DO UPDATE SET local_deleted = 1`, noteID)
+	return err
+}
+
+func (s *Store) SetRemoteDeleted(noteID int64) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO sync_state (note_id, remote_deleted) VALUES (?, 1)
+		 ON CONFLICT(note_id) DO UPDATE SET remote_deleted = 1`, noteID)
+	return err
+}
