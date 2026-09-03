@@ -3,6 +3,8 @@ package notion
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/Mazennaji/notesync/core/internal/markdown"
 )
 
 type Page struct {
@@ -146,6 +148,49 @@ func (c *Client) CheckPage(pageID string) error {
 	_, err := c.do("GET", "/pages/"+pageID, nil)
 	if err != nil {
 		return fmt.Errorf("parent page not accessible (shared with integration?): %w", err)
+	}
+	return nil
+}
+
+func (c *Client) UpdatePageContent(pageID string, blocks []markdown.Block) error {
+	if err := c.clearChildren(pageID); err != nil {
+		return err
+	}
+	return c.appendChildren(pageID, buildBlocks(blocks))
+}
+
+func (c *Client) clearChildren(pageID string) error {
+	data, err := c.do("GET", "/blocks/"+pageID+"/children?page_size=100", nil)
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return err
+	}
+	for _, child := range resp.Results {
+		if _, err := c.do("DELETE", "/blocks/"+child.ID, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Client) appendChildren(pageID string, blocks []map[string]any) error {
+	const batch = 100
+	for i := 0; i < len(blocks); i += batch {
+		end := i + batch
+		if end > len(blocks) {
+			end = len(blocks)
+		}
+		body := map[string]any{"children": blocks[i:end]}
+		if _, err := c.do("PATCH", "/blocks/"+pageID+"/children", body); err != nil {
+			return err
+		}
 	}
 	return nil
 }
