@@ -2,9 +2,10 @@ import * as p from "@clack/prompts";
 import { loadConfig, configExists } from "../config/loader.js";
 import { callCore } from "../core/client.js";
 
-function preview(md: string, lines = 6): string {
-  const out = md.split("\n").slice(0, lines).join("\n");
-  return md.split("\n").length > lines ? out + "\n  …" : out;
+function preview(md: string, lines = 15): string {
+  const parts = md.split("\n");
+  const out = parts.slice(0, lines).join("\n");
+  return parts.length > lines ? out + "\n  …" : out;
 }
 
 export async function resolveCommand(): Promise<void> {
@@ -27,23 +28,27 @@ export async function resolveCommand(): Promise<void> {
   };
 
   if (!conflicts || conflicts.length === 0) {
-    console.log("No unresolved conflicts. ✓");
+    console.log("No unresolved conflicts. \u2713");
     return;
   }
 
   p.intro(`Resolving ${conflicts.length} conflict(s)`);
 
-  let resolved = 0, skipped = 0;
+  let resolved = 0;
+  let skipped = 0;
+
   for (const c of conflicts) {
     const prevRes = await callCore({
       command: "conflicts.preview",
       config: rawConfig,
       args: { noteId: Number(c.noteId) },
     });
+
     if (!prevRes.ok) {
-      p.log.error(`Could not preview ${c.note}: ${prevRes.error}`);
+      p.log.warn(`Skipping ${c.note}: ${prevRes.error}`);
       continue;
     }
+
     const { local, remote } = prevRes.data as { local: string; remote: string };
 
     p.log.step(`Conflict: ${c.note}`);
@@ -58,6 +63,7 @@ export async function resolveCommand(): Promise<void> {
         { value: "skip", label: "Skip — decide later" },
       ],
     });
+
     if (p.isCancel(choice)) {
       p.cancel("Stopped. Remaining conflicts left unresolved.");
       return;
@@ -68,11 +74,17 @@ export async function resolveCommand(): Promise<void> {
       config: rawConfig,
       args: { conflictId: Number(c.id), noteId: Number(c.noteId), choice },
     });
+
     if (!applyRes.ok) {
       p.log.error(`Failed to resolve ${c.note}: ${applyRes.error}`);
       continue;
     }
-    if (choice === "skip") { skipped++; } else { resolved++; }
+
+    if (choice === "skip") {
+      skipped++;
+    } else {
+      resolved++;
+    }
   }
 
   p.outro(`Resolved ${resolved}, skipped ${skipped}.`);
