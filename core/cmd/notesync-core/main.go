@@ -421,6 +421,21 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			"counts":    counts,
 		}}
 
+	case "sync.reset":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+		if err := store.ResetSyncState(); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		return ipc.Response{OK: true, Data: map[string]bool{"reset": true}}
+
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
 	}

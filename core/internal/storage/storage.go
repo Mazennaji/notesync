@@ -240,3 +240,8 @@ func (s *Store) SyncState(noteID int64) (State, error) {
 	}
 	return st, nil
 }
+
+func (s *Store) ResetSyncState() error {
+	_, err := s.DB.Exec(`DELETE FROM sync_state`)
+	return err
+}
