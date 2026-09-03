@@ -367,3 +367,23 @@ func (s *Store) CountUnresolvedConflicts() (int, error) {
 	err := s.DB.QueryRow(`SELECT COUNT(*) FROM conflict WHERE status = 'unresolved'`).Scan(&n)
 	return n, err
 }
+
+func (s *Store) RecordSyncContent(noteID int64, content string) error {
+	_, err := s.DB.Exec(
+		`UPDATE sync_state SET last_synced_content = ? WHERE note_id = ?`,
+		content, noteID,
+	)
+	return err
+}
+
+func (s *Store) BaseContent(noteID int64) (string, error) {
+	var c sql.NullString
+	err := s.DB.QueryRow(
+		`SELECT last_synced_content FROM sync_state WHERE note_id = ?`,
+		noteID,
+	).Scan(&c)
+	if err != nil {
+		return "", nil
+	}
+	return c.String, nil
+}
