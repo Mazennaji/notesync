@@ -368,6 +368,111 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		logger.Info("pull complete", "pulled", pulled, "skipped", skipped)
 		return ipc.Response{OK: true, Data: map[string]int{"pulled": pulled, "skipped": skipped}}
 
+	case "notion.sync":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		dryRun, _ := req.Args["dryRun"].(bool)
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		linked, err := store.LinkedNotes()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		pushed, pulled, conflicts, skipped := 0, 0, 0, 0
+		for _, n := range linked {
+			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("reading %s: %v", n.LocalPath, err)}
+			}
+			localHash := sync.Hash(string(raw))
+
+			remoteMD, err := client.FetchMarkdown(n.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("fetching %s: %v", n.Title, err)}
+			}
+			remoteHash := sync.Hash(remoteMD)
+
+			state, err := store.SyncState(n.ID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+
+			d := sync.Classify(n.LocalPath, localHash, remoteHash, state.LocalHash, state.RemoteHash)
+
+			switch d.Action {
+			case sync.Push, sync.NewLocal:
+				if dryRun {
+					pushed++
+					continue
+				}
+				blocks, err := markdown.Parse(raw)
+				if err != nil {
+					_ = store.LogHistory(n.ID, "sync", "local_to_remote", "error", localHash, remoteHash, err.Error())
+					return ipc.Response{OK: false, Error: fmt.Sprintf("parsing %s: %v", n.LocalPath, err)}
+				}
+				if err := client.UpdatePageContent(n.NotionPageID, blocks); err != nil {
+					_ = store.LogHistory(n.ID, "sync", "local_to_remote", "error", localHash, remoteHash, err.Error())
+					return ipc.Response{OK: false, Error: fmt.Sprintf("pushing %s: %v", n.LocalPath, err)}
+				}
+				echoed, err := client.FetchMarkdown(n.NotionPageID)
+				if err != nil {
+					return ipc.Response{OK: false, Error: fmt.Sprintf("verifying %s: %v", n.Title, err)}
+				}
+				canonicalRemote := sync.Hash(echoed)
+				if err := store.RecordSync(n.ID, localHash, canonicalRemote, localHash, "synced"); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				_ = store.LogHistory(n.ID, "sync", "local_to_remote", "success", localHash, canonicalRemote, "")
+				pushed++
+
+			case sync.Pull:
+				if dryRun {
+					pulled++
+					continue
+				}
+				target := filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath))
+				if err := os.WriteFile(target, []byte(remoteMD), 0o644); err != nil {
+					_ = store.LogHistory(n.ID, "sync", "remote_to_local", "error", localHash, remoteHash, err.Error())
+					return ipc.Response{OK: false, Error: fmt.Sprintf("writing %s: %v", n.LocalPath, err)}
+				}
+				if err := store.RecordSync(n.ID, remoteHash, remoteHash, remoteHash, "synced"); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				_ = store.LogHistory(n.ID, "sync", "remote_to_local", "success", remoteHash, remoteHash, "")
+				pulled++
+
+			case sync.Conflict:
+				if dryRun {
+					conflicts++
+					continue
+				}
+				if err := store.RecordConflict(n.ID, localHash, remoteHash); err != nil {
+					return ipc.Response{OK: false, Error: err.Error()}
+				}
+				_ = store.LogHistory(n.ID, "sync", "conflict", "conflict", localHash, remoteHash, "both sides changed")
+				conflicts++
+
+			default:
+				skipped++
+			}
+		}
+
+		logger.Info("sync complete", "dryRun", dryRun, "pushed", pushed, "pulled", pulled, "conflicts", conflicts, "skipped", skipped)
+		return ipc.Response{OK: true, Data: map[string]any{
+			"dryRun": dryRun, "pushed": pushed, "pulled": pulled, "conflicts": conflicts, "skipped": skipped,
+		}}
+
 	case "sync.diff":
 		cfg, err := decodeConfig(req.Config)
 		if err != nil {
@@ -435,98 +540,6 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
 		return ipc.Response{OK: true, Data: map[string]bool{"reset": true}}
-
-	case "notion.sync":
-		cfg, err := decodeConfig(req.Config)
-		if err != nil {
-			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
-		}
-		client, err := notion.New()
-		if err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
-		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
-		if err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
-		defer store.Close()
-
-		linked, err := store.LinkedNotes()
-		if err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
-
-		pushed, pulled, conflicts, skipped := 0, 0, 0, 0
-		for _, n := range linked {
-			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
-			if err != nil {
-				return ipc.Response{OK: false, Error: fmt.Sprintf("reading %s: %v", n.LocalPath, err)}
-			}
-			localHash := sync.Hash(string(raw))
-
-			remoteMD, err := client.FetchMarkdown(n.NotionPageID)
-			if err != nil {
-				return ipc.Response{OK: false, Error: fmt.Sprintf("fetching %s: %v", n.Title, err)}
-			}
-			remoteHash := sync.Hash(remoteMD)
-
-			state, err := store.SyncState(n.ID)
-			if err != nil {
-				return ipc.Response{OK: false, Error: err.Error()}
-			}
-
-			d := sync.Classify(n.LocalPath, localHash, remoteHash, state.LocalHash, state.RemoteHash)
-
-			switch d.Action {
-			case sync.Push, sync.NewLocal:
-				blocks, err := markdown.Parse(raw)
-				if err != nil {
-					_ = store.LogHistory(n.ID, "sync", "local_to_remote", "error", localHash, remoteHash, err.Error())
-					return ipc.Response{OK: false, Error: fmt.Sprintf("parsing %s: %v", n.LocalPath, err)}
-				}
-				if err := client.UpdatePageContent(n.NotionPageID, blocks); err != nil {
-					_ = store.LogHistory(n.ID, "sync", "local_to_remote", "error", localHash, remoteHash, err.Error())
-					return ipc.Response{OK: false, Error: fmt.Sprintf("pushing %s: %v", n.LocalPath, err)}
-				}
-				echoed, err := client.FetchMarkdown(n.NotionPageID)
-				if err != nil {
-					return ipc.Response{OK: false, Error: fmt.Sprintf("verifying %s: %v", n.Title, err)}
-				}
-				canonicalRemote := sync.Hash(echoed)
-				if err := store.RecordSync(n.ID, localHash, canonicalRemote, localHash, "synced"); err != nil {
-					return ipc.Response{OK: false, Error: err.Error()}
-				}
-				_ = store.LogHistory(n.ID, "sync", "local_to_remote", "success", localHash, canonicalRemote, "")
-				pushed++
-
-			case sync.Pull:
-				target := filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath))
-				if err := os.WriteFile(target, []byte(remoteMD), 0o644); err != nil {
-					_ = store.LogHistory(n.ID, "sync", "remote_to_local", "error", localHash, remoteHash, err.Error())
-					return ipc.Response{OK: false, Error: fmt.Sprintf("writing %s: %v", n.LocalPath, err)}
-				}
-				if err := store.RecordSync(n.ID, remoteHash, remoteHash, remoteHash, "synced"); err != nil {
-					return ipc.Response{OK: false, Error: err.Error()}
-				}
-				_ = store.LogHistory(n.ID, "sync", "remote_to_local", "success", remoteHash, remoteHash, "")
-				pulled++
-
-			case sync.Conflict:
-				if err := store.RecordConflict(n.ID, localHash, remoteHash); err != nil {
-					return ipc.Response{OK: false, Error: err.Error()}
-				}
-				_ = store.LogHistory(n.ID, "sync", "conflict", "conflict", localHash, remoteHash, "both sides changed")
-				conflicts++
-
-			default:
-				skipped++
-			}
-		}
-
-		logger.Info("sync complete", "pushed", pushed, "pulled", pulled, "conflicts", conflicts, "skipped", skipped)
-		return ipc.Response{OK: true, Data: map[string]int{
-			"pushed": pushed, "pulled": pulled, "conflicts": conflicts, "skipped": skipped,
-		}}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
