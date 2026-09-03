@@ -171,6 +171,24 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		return ipc.Response{OK: true, Data: map[string]int{
 			"found": len(pages), "linked": linked,
 		}}
+
+	case "config.setParent":
+		if _, err := decodeConfig(req.Config); err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		parentID, _ := req.Args["parentId"].(string)
+		if parentID == "" {
+			return ipc.Response{OK: false, Error: "parentId is required"}
+		}
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		if err := client.CheckPage(parentID); err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		return ipc.Response{OK: true, Data: map[string]string{"parentId": parentID}}
+
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
 	}

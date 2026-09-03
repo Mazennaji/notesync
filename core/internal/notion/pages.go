@@ -1,6 +1,9 @@
 package notion
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type Page struct {
 	ID    string
@@ -94,4 +97,12 @@ func extractTitle(props map[string]json.RawMessage) string {
 		}
 	}
 	return "Untitled"
+}
+
+func (c *Client) CheckPage(pageID string) error {
+	_, err := c.do("GET", "/pages/"+pageID, nil)
+	if err != nil {
+		return fmt.Errorf("parent page not accessible (shared with integration?): %w", err)
+	}
+	return nil
 }
