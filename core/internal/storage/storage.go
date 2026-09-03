@@ -43,35 +43,6 @@ type Conflict struct {
 	DetectedAt   string
 }
 
-func (s *Store) UnlinkedNotes() ([]Note, error) {
-	rows, err := s.DB.Query(
-		`SELECT id, local_path, title FROM note
-		 WHERE notion_page_id IS NULL OR notion_page_id = ''`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var notes []Note
-	for rows.Next() {
-		var n Note
-		if err := rows.Scan(&n.ID, &n.LocalPath, &n.Title); err != nil {
-			return nil, err
-		}
-		notes = append(notes, n)
-	}
-	return notes, rows.Err()
-}
-
-func (s *Store) SetNotionPageID(noteID int64, pageID string) error {
-	_, err := s.DB.Exec(
-		`UPDATE note SET notion_page_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		pageID, noteID,
-	)
-	return err
-}
-
 func Open(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
@@ -91,6 +62,10 @@ func Open(dbPath string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func (s *Store) Close() error {
+	return s.DB.Close()
 }
 
 func (s *Store) migrate() error {
@@ -126,13 +101,21 @@ func (s *Store) columnExists(table, col string) bool {
 	return false
 }
 
-func mustRead(path string) string {
-	b, _ := migrationsFS.ReadFile(path)
+func mustRead(p string) string {
+	b, _ := migrationsFS.ReadFile(p)
 	return string(b)
 }
 
-func (s *Store) Close() error {
-	return s.DB.Close()
+func titleFromPath(p string) string {
+	base := path.Base(p)
+	return strings.TrimSuffix(base, path.Ext(base))
+}
+
+func nullify(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (s *Store) UpsertNotes(paths []string) (int, error) {
@@ -174,9 +157,33 @@ func (s *Store) CountNotes() (int, error) {
 	return n, err
 }
 
-func titleFromPath(p string) string {
-	base := path.Base(p)
-	return strings.TrimSuffix(base, path.Ext(base))
+func (s *Store) UnlinkedNotes() ([]Note, error) {
+	rows, err := s.DB.Query(
+		`SELECT id, local_path, title FROM note
+		 WHERE (notion_page_id IS NULL OR notion_page_id = '') AND deleted = 0`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []Note
+	for rows.Next() {
+		var n Note
+		if err := rows.Scan(&n.ID, &n.LocalPath, &n.Title); err != nil {
+			return nil, err
+		}
+		notes = append(notes, n)
+	}
+	return notes, rows.Err()
+}
+
+func (s *Store) SetNotionPageID(noteID int64, pageID string) error {
+	_, err := s.DB.Exec(
+		`UPDATE note SET notion_page_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		pageID, noteID,
+	)
+	return err
 }
 
 func (s *Store) LinkNotionPage(title, pageID string) (bool, error) {
@@ -195,7 +202,8 @@ func (s *Store) LinkNotionPage(title, pageID string) (bool, error) {
 func (s *Store) CountLinkedNotes() (int, error) {
 	var n int
 	err := s.DB.QueryRow(
-		`SELECT COUNT(*) FROM note WHERE notion_page_id IS NOT NULL AND notion_page_id != ''`,
+		`SELECT COUNT(*) FROM note
+		 WHERE notion_page_id IS NOT NULL AND notion_page_id != '' AND deleted = 0`,
 	).Scan(&n)
 	return n, err
 }
@@ -203,7 +211,7 @@ func (s *Store) CountLinkedNotes() (int, error) {
 func (s *Store) LinkedNotes() ([]Note, error) {
 	rows, err := s.DB.Query(
 		`SELECT id, local_path, title, notion_page_id FROM note
-		 WHERE notion_page_id IS NOT NULL AND notion_page_id != ''`,
+		 WHERE notion_page_id IS NOT NULL AND notion_page_id != '' AND deleted = 0`,
 	)
 	if err != nil {
 		return nil, err
@@ -221,6 +229,20 @@ func (s *Store) LinkedNotes() ([]Note, error) {
 	return notes, rows.Err()
 }
 
+func (s *Store) NoteByID(id int64) (Note, error) {
+	var n Note
+	err := s.DB.QueryRow(
+		`SELECT id, local_path, title, COALESCE(notion_page_id,'') FROM note WHERE id = ?`,
+		id,
+	).Scan(&n.ID, &n.LocalPath, &n.Title, &n.NotionPageID)
+	return n, err
+}
+
+func (s *Store) MarkNoteDeleted(noteID int64) error {
+	_, err := s.DB.Exec(`UPDATE note SET deleted = 1 WHERE id = ?`, noteID)
+	return err
+}
+
 func (s *Store) LastSyncedHash(noteID int64) (string, error) {
 	var h string
 	err := s.DB.QueryRow(
@@ -231,6 +253,19 @@ func (s *Store) LastSyncedHash(noteID int64) (string, error) {
 		return "", nil
 	}
 	return h, nil
+}
+
+func (s *Store) SyncState(noteID int64) (State, error) {
+	var st State
+	err := s.DB.QueryRow(
+		`SELECT COALESCE(local_hash,''), COALESCE(remote_hash,''), COALESCE(last_synced_hash,'')
+		 FROM sync_state WHERE note_id = ?`,
+		noteID,
+	).Scan(&st.LocalHash, &st.RemoteHash, &st.LastSyncedHash)
+	if err != nil {
+		return State{}, nil
+	}
+	return st, nil
 }
 
 func (s *Store) RecordSync(noteID int64, localHash, remoteHash, syncedHash, status string) error {
@@ -249,57 +284,8 @@ func (s *Store) RecordSync(noteID int64, localHash, remoteHash, syncedHash, stat
 	return err
 }
 
-func (s *Store) LogHistory(noteID int64, operation, direction, status, localHash, remoteHash, errMsg string) error {
-	_, err := s.DB.Exec(
-		`INSERT INTO sync_history
-		   (note_id, operation, direction, status, local_hash, remote_hash, error_message)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		noteID, operation, direction, status, localHash, remoteHash, nullify(errMsg),
-	)
-	return err
-}
-
-func nullify(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
-func (s *Store) SyncState(noteID int64) (State, error) {
-	var st State
-	err := s.DB.QueryRow(
-		`SELECT COALESCE(local_hash,''), COALESCE(remote_hash,''), COALESCE(last_synced_hash,'')
-		 FROM sync_state WHERE note_id = ?`,
-		noteID,
-	).Scan(&st.LocalHash, &st.RemoteHash, &st.LastSyncedHash)
-	if err != nil {
-		return State{}, nil
-	}
-	return st, nil
-}
-
 func (s *Store) ResetSyncState() error {
 	_, err := s.DB.Exec(`DELETE FROM sync_state`)
-	return err
-}
-
-func (s *Store) RecordConflict(noteID int64, localHash, remoteHash string) error {
-	_, err := s.DB.Exec(
-		`INSERT INTO conflict (note_id, local_hash, remote_hash, status)
-		 VALUES (?, ?, ?, 'unresolved')`,
-		noteID, localHash, remoteHash,
-	)
-	return err
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func (s *Store) MarkNoteDeleted(noteID int64) error {
-	_, err := s.DB.Exec(`UPDATE note SET deleted = 1 WHERE id = ?`, noteID)
 	return err
 }
 
@@ -317,13 +303,32 @@ func (s *Store) SetRemoteDeleted(noteID int64) error {
 	return err
 }
 
+func (s *Store) LogHistory(noteID int64, operation, direction, status, localHash, remoteHash, errMsg string) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO sync_history
+		   (note_id, operation, direction, status, local_hash, remote_hash, error_message)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		noteID, operation, direction, status, localHash, remoteHash, nullify(errMsg),
+	)
+	return err
+}
+
+func (s *Store) RecordConflict(noteID int64, localHash, remoteHash string) error {
+	_, err := s.DB.Exec(
+		`INSERT INTO conflict (note_id, local_hash, remote_hash, status)
+		 VALUES (?, ?, ?, 'unresolved')`,
+		noteID, localHash, remoteHash,
+	)
+	return err
+}
+
 func (s *Store) UnresolvedConflicts() ([]Conflict, error) {
 	rows, err := s.DB.Query(
 		`SELECT c.id, c.note_id, n.local_path, n.title, n.notion_page_id,
 		        COALESCE(c.local_hash,''), COALESCE(c.remote_hash,''), c.detected_at
 		 FROM conflict c
 		 JOIN note n ON n.id = c.note_id
-		 WHERE c.status = 'unresolved'
+		 WHERE c.status = 'unresolved' AND n.deleted = 0
 		 ORDER BY c.detected_at`,
 	)
 	if err != nil {
@@ -355,14 +360,5 @@ func (s *Store) ResolveConflict(conflictID int64, resolution string) error {
 func (s *Store) CountUnresolvedConflicts() (int, error) {
 	var n int
 	err := s.DB.QueryRow(`SELECT COUNT(*) FROM conflict WHERE status = 'unresolved'`).Scan(&n)
-	return n, err
-}
-
-func (s *Store) NoteByID(id int64) (Note, error) {
-	var n Note
-	err := s.DB.QueryRow(
-		`SELECT id, local_path, title, COALESCE(notion_page_id,'') FROM note WHERE id = ?`,
-		id,
-	).Scan(&n.ID, &n.LocalPath, &n.Title, &n.NotionPageID)
 	return n, err
 }
