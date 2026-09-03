@@ -643,6 +643,7 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		for _, c := range conflicts {
 			out = append(out, map[string]string{
 				"id":         fmt.Sprintf("%d", c.ID),
+				"noteId":     fmt.Sprintf("%d", c.NoteID),
 				"note":       c.LocalPath,
 				"detectedAt": c.DetectedAt,
 			})
@@ -771,4 +772,18 @@ func fileExistsAt(path string) bool {
 func fail(l *slog.Logger, msg string) {
 	l.Error(msg)
 	_ = json.NewEncoder(os.Stdout).Encode(ipc.Response{OK: false, Error: msg})
+}
+
+func toFloat(v any) float64 {
+	f, _ := v.(float64)
+	return f
+}
+
+func (s *Store) NoteByID(id int64) (Note, error) {
+	var n Note
+	err := s.DB.QueryRow(
+		`SELECT id, local_path, title, COALESCE(notion_page_id,'') FROM note WHERE id = ?`,
+		id,
+	).Scan(&n.ID, &n.LocalPath, &n.Title, &n.NotionPageID)
+	return n, err
 }
