@@ -176,3 +176,15 @@ func (s *Store) LinkedNotes() ([]Note, error) {
 	}
 	return notes, rows.Err()
 }
+
+func (s *Store) LastSyncedHash(noteID int64) (string, error) {
+	var h string
+	err := s.DB.QueryRow(
+		`SELECT COALESCE(last_synced_hash, '') FROM sync_state WHERE note_id = ?`,
+		noteID,
+	).Scan(&h)
+	if err != nil {
+		return "", nil
+	}
+	return h, nil
+}
