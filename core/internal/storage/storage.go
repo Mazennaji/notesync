@@ -83,17 +83,41 @@ func Open(dbPath string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	files := []string{"migrations/001_init.sql", "migrations/002_deletions.sql"}
-	for _, f := range files {
-		sqlBytes, err := migrationsFS.ReadFile(f)
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", f, err)
-		}
-		if _, err := s.DB.Exec(string(sqlBytes)); err != nil {
-			return fmt.Errorf("apply migration %s: %w", f, err)
+	if _, err := s.DB.Exec(mustRead("migrations/001_init.sql")); err != nil {
+		return fmt.Errorf("apply 001: %w", err)
+	}
+	if !s.columnExists("note", "deleted") {
+		if _, err := s.DB.Exec(mustRead("migrations/002_deletions.sql")); err != nil {
+			return fmt.Errorf("apply 002: %w", err)
 		}
 	}
 	return nil
+}
+
+func (s *Store) columnExists(table, col string) bool {
+	rows, err := s.DB.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false
+		}
+		if name == col {
+			return true
+		}
+	}
+	return false
+}
+
+func mustRead(path string) string {
+	b, _ := migrationsFS.ReadFile(path)
+	return string(b)
 }
 
 func (s *Store) Close() error {
