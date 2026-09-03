@@ -83,12 +83,15 @@ func Open(dbPath string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	sqlBytes, err := migrationsFS.ReadFile("migrations/001_init.sql")
-	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
-	}
-	if _, err := s.DB.Exec(string(sqlBytes)); err != nil {
-		return fmt.Errorf("apply migration: %w", err)
+	files := []string{"migrations/001_init.sql", "migrations/002_deletions.sql"}
+	for _, f := range files {
+		sqlBytes, err := migrationsFS.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", f, err)
+		}
+		if _, err := s.DB.Exec(string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply migration %s: %w", f, err)
+		}
 	}
 	return nil
 }
