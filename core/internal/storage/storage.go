@@ -26,6 +26,12 @@ type Note struct {
 	NotionPageID string
 }
 
+type State struct {
+	LocalHash      string
+	RemoteHash     string
+	LastSyncedHash string
+}
+
 func (s *Store) UnlinkedNotes() ([]Note, error) {
 	rows, err := s.DB.Query(
 		`SELECT id, local_path, title FROM note
@@ -220,4 +226,17 @@ func nullify(s string) any {
 		return nil
 	}
 	return s
+}
+
+func (s *Store) SyncState(noteID int64) (State, error) {
+	var st State
+	err := s.DB.QueryRow(
+		`SELECT COALESCE(local_hash,''), COALESCE(remote_hash,''), COALESCE(last_synced_hash,'')
+		 FROM sync_state WHERE note_id = ?`,
+		noteID,
+	).Scan(&st.LocalHash, &st.RemoteHash, &st.LastSyncedHash)
+	if err != nil {
+		return State{}, nil
+	}
+	return st, nil
 }

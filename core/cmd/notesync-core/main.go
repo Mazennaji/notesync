@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/Mazennaji/notesync/core/internal/auth"
 	"github.com/Mazennaji/notesync/core/internal/config"
@@ -62,10 +61,15 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		if err != nil {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
+		linked, err := store.CountLinkedNotes()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
 		return ipc.Response{OK: true, Data: map[string]any{
 			"vaultPath": cfg.VaultPath,
 			"syncMode":  cfg.SyncMode,
 			"notes":     count,
+			"linked":    linked,
 		}}
 
 	case "config.validate":
@@ -264,8 +268,12 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			}
 			remoteHash := sync.Hash(remoteMD)
 
-			lastSynced, _ := store.LastSyncedHash(n.ID)
-			d := sync.Classify(n.LocalPath, localHash, remoteHash, lastSynced)
+			state, err := store.SyncState(n.ID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+
+			d := sync.Classify(n.LocalPath, localHash, remoteHash, state.LocalHash, state.RemoteHash)
 
 			if d.Action != sync.Push && d.Action != sync.NewLocal {
 				skipped++
@@ -282,15 +290,83 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 				return ipc.Response{OK: false, Error: fmt.Sprintf("pushing %s: %v", n.LocalPath, err)}
 			}
 
-			if err := store.RecordSync(n.ID, localHash, localHash, localHash, "synced"); err != nil {
+			echoed, err := client.FetchMarkdown(n.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("verifying %s: %v", n.Title, err)}
+			}
+			canonicalRemote := sync.Hash(echoed)
+
+			if err := store.RecordSync(n.ID, localHash, canonicalRemote, localHash, "synced"); err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
-			_ = store.LogHistory(n.ID, "push", "local_to_remote", "success", localHash, localHash, "")
+			_ = store.LogHistory(n.ID, "push", "local_to_remote", "success", localHash, canonicalRemote, "")
 			pushed++
 		}
 
 		logger.Info("push complete", "pushed", pushed, "skipped", skipped)
 		return ipc.Response{OK: true, Data: map[string]int{"pushed": pushed, "skipped": skipped}}
+
+	case "notion.pull":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		linked, err := store.LinkedNotes()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		pulled, skipped := 0, 0
+		for _, n := range linked {
+			raw, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("reading %s: %v", n.LocalPath, err)}
+			}
+			localHash := sync.Hash(string(raw))
+
+			remoteMD, err := client.FetchMarkdown(n.NotionPageID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: fmt.Sprintf("fetching %s: %v", n.Title, err)}
+			}
+			remoteHash := sync.Hash(remoteMD)
+
+			state, err := store.SyncState(n.ID)
+			if err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+
+			d := sync.Classify(n.LocalPath, localHash, remoteHash, state.LocalHash, state.RemoteHash)
+
+			if d.Action != sync.Pull {
+				skipped++
+				continue
+			}
+
+			target := filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath))
+			if err := os.WriteFile(target, []byte(remoteMD), 0o644); err != nil {
+				_ = store.LogHistory(n.ID, "pull", "remote_to_local", "error", localHash, remoteHash, err.Error())
+				return ipc.Response{OK: false, Error: fmt.Sprintf("writing %s: %v", n.LocalPath, err)}
+			}
+
+			if err := store.RecordSync(n.ID, remoteHash, remoteHash, remoteHash, "synced"); err != nil {
+				return ipc.Response{OK: false, Error: err.Error()}
+			}
+			_ = store.LogHistory(n.ID, "pull", "remote_to_local", "success", remoteHash, remoteHash, "")
+			pulled++
+		}
+
+		logger.Info("pull complete", "pulled", pulled, "skipped", skipped)
+		return ipc.Response{OK: true, Data: map[string]int{"pulled": pulled, "skipped": skipped}}
 
 	case "sync.diff":
 		cfg, err := decodeConfig(req.Config)
@@ -327,12 +403,12 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			}
 			remoteHash := sync.Hash(remoteMD)
 
-			lastSynced, err := store.LastSyncedHash(n.ID)
+			state, err := store.SyncState(n.ID)
 			if err != nil {
 				return ipc.Response{OK: false, Error: err.Error()}
 			}
 
-			d := sync.Classify(n.LocalPath, localHash, remoteHash, lastSynced)
+			d := sync.Classify(n.LocalPath, localHash, remoteHash, state.LocalHash, state.RemoteHash)
 			counts[string(d.Action)]++
 			decisions = append(decisions, map[string]string{
 				"note":   d.NotePath,
@@ -344,30 +420,6 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			"decisions": decisions,
 			"counts":    counts,
 		}}
-
-	case "debug.roundtrip":
-		cfg, _ := decodeConfig(req.Config)
-		client, err := notion.New()
-		if err != nil {
-			return ipc.Response{OK: false, Error: err.Error()}
-		}
-		store, _ := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
-		defer store.Close()
-		linked, _ := store.LinkedNotes()
-		for _, n := range linked {
-			if !strings.Contains(n.LocalPath, "ClientFlow") {
-				continue
-			}
-			raw, _ := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
-			remoteMD, _ := client.FetchMarkdown(n.NotionPageID)
-			return ipc.Response{OK: true, Data: map[string]any{
-				"localNormalized":  sync.Hash(string(raw)),
-				"remoteNormalized": sync.Hash(remoteMD),
-				"local":            string(raw),
-				"remote":           remoteMD,
-			}}
-		}
-		return ipc.Response{OK: false, Error: "ClientFlow not found"}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}

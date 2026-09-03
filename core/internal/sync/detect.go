@@ -17,16 +17,16 @@ type Decision struct {
 	RemoteHash string
 }
 
-func Classify(notePath, localHash, remoteHash, lastSyncedHash string) Decision {
+func Classify(notePath, localHash, remoteHash, lastLocalHash, lastRemoteHash string) Decision {
 	d := Decision{NotePath: notePath, LocalHash: localHash, RemoteHash: remoteHash}
 
-	if lastSyncedHash == "" {
+	if lastLocalHash == "" && lastRemoteHash == "" {
 		d.Action = NewLocal
 		return d
 	}
 
-	localChanged := localHash != lastSyncedHash
-	remoteChanged := remoteHash != lastSyncedHash
+	localChanged := localHash != lastLocalHash
+	remoteChanged := remoteHash != lastRemoteHash
 
 	switch {
 	case !localChanged && !remoteChanged:
