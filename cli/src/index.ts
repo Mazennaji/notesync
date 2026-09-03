@@ -9,6 +9,7 @@ import { createCommand } from "./commands/create.js";
 import { pushCommand } from "./commands/push.js";
 import { diffCommand } from "./commands/diff.js";
 import { pullCommand } from "./commands/pull.js";
+import { syncCommand } from "./commands/sync.js";
 
 const program = new Command();
 
@@ -79,4 +80,8 @@ program.command("diff")
 program.command("pull")
   .description("Pull note content from Notion into the vault")
   .action(pullCommand);
+
+program.command("sync")
+  .description("Synchronize both directions")
+  .action(syncCommand);
 program.parse();
