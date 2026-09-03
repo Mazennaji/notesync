@@ -1,0 +1,1 @@
+ALTER TABLE sync_state ADD COLUMN last_synced_content TEXT;
