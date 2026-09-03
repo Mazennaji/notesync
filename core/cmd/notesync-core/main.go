@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Mazennaji/notesync/core/internal/auth"
 	"github.com/Mazennaji/notesync/core/internal/config"
@@ -343,6 +344,30 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 			"decisions": decisions,
 			"counts":    counts,
 		}}
+
+	case "debug.roundtrip":
+		cfg, _ := decodeConfig(req.Config)
+		client, err := notion.New()
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		store, _ := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		defer store.Close()
+		linked, _ := store.LinkedNotes()
+		for _, n := range linked {
+			if !strings.Contains(n.LocalPath, "ClientFlow") {
+				continue
+			}
+			raw, _ := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(n.LocalPath)))
+			remoteMD, _ := client.FetchMarkdown(n.NotionPageID)
+			return ipc.Response{OK: true, Data: map[string]any{
+				"localNormalized":  sync.Hash(string(raw)),
+				"remoteNormalized": sync.Hash(remoteMD),
+				"local":            string(raw),
+				"remote":           remoteMD,
+			}}
+		}
+		return ipc.Response{OK: false, Error: "ClientFlow not found"}
 
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
