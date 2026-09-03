@@ -7,6 +7,7 @@ import { pagesCommand } from "./commands/pages.js";
 import { parentCommand } from "./commands/parent.js";
 import { createCommand } from "./commands/create.js";
 import { pushCommand } from "./commands/push.js";
+import { diffCommand } from "./commands/diff.js";
 
 const program = new Command();
 
@@ -70,4 +71,7 @@ program.command("push")
   .description("Push local note content to Notion")
   .action(pushCommand);
 
+program.command("diff")
+  .description("Show what would be synchronized (read-only)")
+  .action(diffCommand);
 program.parse();
