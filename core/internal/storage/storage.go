@@ -43,6 +43,16 @@ type Conflict struct {
 	DetectedAt   string
 }
 
+type HistoryEntry struct {
+	ID        int64
+	LocalPath string
+	Operation string
+	Direction string
+	Status    string
+	ErrorMsg  string
+	CreatedAt string
+}
+
 func Open(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
@@ -396,4 +406,32 @@ func (s *Store) CountUnresolvedConflicts() (int, error) {
 	var n int
 	err := s.DB.QueryRow(`SELECT COUNT(*) FROM conflict WHERE status = 'unresolved'`).Scan(&n)
 	return n, err
+}
+
+func (s *Store) RecentHistory(limit int) ([]HistoryEntry, error) {
+	rows, err := s.DB.Query(
+		`SELECT h.id, COALESCE(n.local_path, '(deleted note)'),
+		        h.operation, COALESCE(h.direction,''), h.status,
+		        COALESCE(h.error_message,''), h.created_at
+		 FROM sync_history h
+		 LEFT JOIN note n ON n.id = h.note_id
+		 ORDER BY h.created_at DESC, h.id DESC
+		 LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []HistoryEntry
+	for rows.Next() {
+		var e HistoryEntry
+		if err := rows.Scan(&e.ID, &e.LocalPath, &e.Operation,
+			&e.Direction, &e.Status, &e.ErrorMsg, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
