@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { env } from "node:process";
+import { env, platform } from "node:process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -17,8 +17,10 @@ export interface CoreResponse<T = unknown> {
   error?: string;
 }
 
-const CORE_BIN = env.NOTESYNC_CORE
-  ?? join(__dirname, "../../../core/notesync-core");
+const VERBOSE = env.NOTESYNC_VERBOSE === "1";
+
+const binName = platform === "win32" ? "notesync-core.exe" : "notesync-core";
+const CORE_BIN = env.NOTESYNC_CORE ?? join(__dirname, "../../../core", binName);
 
 export function callCore<T = unknown>(req: CoreRequest): Promise<CoreResponse<T>> {
   return new Promise((resolve, reject) => {
@@ -31,6 +33,9 @@ export function callCore<T = unknown>(req: CoreRequest): Promise<CoreResponse<T>
 
     proc.on("error", reject);
     proc.on("close", (code) => {
+      if (VERBOSE && stderr) {
+        process.stderr.write(stderr);
+      }
       if (code !== 0 && !stdout) {
         return reject(new Error(`core exited ${code}: ${stderr}`));
       }
