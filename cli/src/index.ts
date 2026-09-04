@@ -14,6 +14,7 @@ import { conflictsCommand } from "./commands/conflicts.js";
 import { resolveCommand } from "./commands/resolve.js";
 import { historyCommand } from "./commands/history.js";
 import { watchCommand } from "./commands/watch.js";
+import { completionCommand } from "./commands/completion.js";
 
 const program = new Command();
 
@@ -112,5 +113,10 @@ program
       process.env.NOTESYNC_VERBOSE = "1";
     }
   });
+
+program.command("completion")
+  .description("Output shell completion script (bash, zsh, powershell)")
+  .option("-s, --shell <shell>", "Target shell", "bash")
+  .action(completionCommand);
 
 program.parse();
