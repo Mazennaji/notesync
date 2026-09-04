@@ -18,7 +18,7 @@ Notesync keeps your Obsidian Markdown vault and Notion workspace in sync — tra
 [![Obsidian](https://img.shields.io/badge/Obsidian-Vault-7C3AED?style=for-the-badge&logo=obsidian&logoColor=white)](https://obsidian.md/)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/status-active%20development-orange.svg?style=flat-square)](#-status)
+[![Status](https://img.shields.io/badge/status-MVP%20working-brightgreen.svg?style=flat-square)](#-status)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](#-contributing)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey.svg?style=flat-square)](#-cicd)
 
@@ -41,20 +41,23 @@ flowchart TD
 
 ## ✨ Features
 
-| | |
-|---|---|
-| 🔄 **Bidirectional sync** | Between Obsidian and Notion |
-| 📝 **Markdown ↔ Blocks** | Full Markdown to Notion block conversion |
-| 🔍 **Change detection** | Powered by content hashes |
-| ⚠️ **Conflict handling** | Detection and interactive resolution |
-| 🧪 **Dry-run mode** | Preview every change safely |
-| 🗃️ **Local state** | Persisted in SQLite |
-| 📜 **Sync history** | Full audit of past operations |
-| 👀 **Watch mode** | Automatic sync on file changes |
-| 🔐 **Secure auth** | Notion credentials kept out of the repo |
-| 🖥️ **Cross-platform** | Linux · macOS · Windows |
-| 🚀 **Native core** | Fast Go engine with a friendly TypeScript CLI |
-| 🧩 **Modular** | Architecture designed for future providers |
+| | | |
+|---|---|:-:|
+| 🔄 **Bidirectional sync** | Between Obsidian and Notion | ✅ |
+| 📝 **Markdown ↔ Blocks** | Markdown to Notion block conversion (both directions) | ✅ |
+| 🔍 **Change detection** | Per-side comparison powered by content hashes | ✅ |
+| ⚠️ **Conflict handling** | Detection, interactive resolution, three-way merge | ✅ |
+| 🧪 **Dry-run mode** | Preview every change safely | ✅ |
+| 🗑️ **Deletion handling** | Soft-delete both sides; opt-in propagation | ✅ |
+| 🗃️ **Local state** | Persisted in SQLite | ✅ |
+| 📜 **Sync history** | Full audit of past operations | ✅ |
+| 🔐 **Secure auth** | Notion token stored in the OS credential store | ✅ |
+| 🖥️ **Cross-platform** | Linux · macOS · Windows | ✅ |
+| 🚀 **Native core** | Fast Go engine with a friendly TypeScript CLI | ✅ |
+| 👀 **Watch mode** | Automatic sync on file changes | 🚧 |
+| 🧩 **Modular** | Architecture designed for future providers | ✅ |
+
+<sub>✅ implemented · 🚧 planned</sub>
 
 ---
 
@@ -114,7 +117,7 @@ The core synchronization engine.
 - File system operations
 - Markdown processing & change detection
 - Synchronization algorithms
-- Conflict detection
+- Conflict detection & three-way merge
 - Notion integration
 - SQLite state management
 - Concurrent operations & structured logging
@@ -175,8 +178,7 @@ The diagram below maps each CLI command to the underlying operations it triggers
 | Synchronize Notes | Detect Changes · Detect Conflicts · Convert Markdown ↔ Blocks · Store Sync State | Notion API · Obsidian Vault |
 | Push Changes | Detect Changes · Convert Markdown ↔ Blocks · Store Sync State | Notion API · Obsidian Vault |
 | Pull Changes | Detect Changes · Convert Markdown ↔ Blocks · Store Sync State | Notion API · Obsidian Vault |
-| Resolve Conflicts | Detect Conflicts · Store Sync State | — |
-| Watch Vault | Synchronize Notes | Obsidian Vault |
+| Resolve Conflicts | Detect Conflicts · Three-way Merge · Store Sync State | Notion API · Obsidian Vault |
 | Check Status / View History | — | — |
 
 ---
@@ -204,8 +206,9 @@ The diagram below maps each CLI command to the underlying operations it triggers
 | ⚡ CLI Framework | Commander.js |
 | 🎨 Terminal UX | @clack/prompts |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/markdown/markdown-original.svg" width="16"/> Markdown | Goldmark |
-| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/sqlite/sqlite-original.svg" width="16"/> Database | SQLite |
+| <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/sqlite/sqlite-original.svg" width="16"/> Database | SQLite (modernc.org/sqlite, pure Go) |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/notion/notion-original.svg" width="16"/> Remote API | Notion API |
+| 🔐 Credentials | OS keyring (zalando/go-keyring) |
 | 📋 Logging | Go `slog` |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vitest/vitest-original.svg" width="16"/> TS Testing | Vitest |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/go/go-original.svg" width="16"/> Go Testing | Go `testing` |
@@ -222,8 +225,7 @@ notesync/
 │   ├── src/
 │   │   ├── commands/
 │   │   ├── config/
-│   │   ├── prompts/
-│   │   ├── output/
+│   │   ├── core/               # IPC client to the Go core
 │   │   └── index.ts
 │   ├── package.json
 │   └── tsconfig.json
@@ -232,29 +234,20 @@ notesync/
 │   ├── cmd/notesync-core/
 │   │   └── main.go
 │   ├── internal/
-│   │   ├── sync/
-│   │   ├── obsidian/
-│   │   ├── notion/
-│   │   ├── markdown/
-│   │   ├── conflict/
-│   │   ├── storage/
-│   │   ├── auth/
-│   │   └── history/
-│   ├── migrations/
+│   │   ├── sync/               # hashing, change detection, three-way merge
+│   │   ├── obsidian/           # vault discovery, trash
+│   │   ├── notion/             # API client, blocks ↔ markdown
+│   │   ├── markdown/           # Goldmark parsing
+│   │   ├── storage/            # SQLite state + migrations
+│   │   ├── auth/               # OS keyring
+│   │   ├── config/
+│   │   └── ipc/
 │   ├── go.mod
 │   └── go.sum
 │
-├── tests/                      # Integration tests & fixtures
-│   ├── integration/
-│   └── fixtures/
+├── docs/
+│   └── architecture/
 │
-├── docs/                       # Architecture & dev docs
-│   ├── architecture/
-│   ├── database/
-│   └── development/
-│
-├── .github/workflows/
-├── Makefile
 ├── LICENSE
 └── README.md
 ```
@@ -270,25 +263,26 @@ notesync/
 - <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/notion/notion-original.svg" width="14"/> A **Notion** integration
 - 🗂️ An **Obsidian** vault
 
+> **No C compiler required** — Notesync uses a pure-Go SQLite driver, so builds and cross-compilation work out of the box.
+
 ### Installation
-
-**Via npm**
-
-```bash
-npm install -g notesync
-```
 
 **From source**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/notesync.git
+git clone https://github.com/Mazennaji/notesync.git
 cd notesync
+
+# Build the TypeScript CLI
+cd cli
 npm install
 npm run build
+cd ..
 
 # Build the Go core
 cd core
-go build ./cmd/notesync-core
+go build -o notesync-core ./cmd/notesync-core
+cd ..
 ```
 
 ---
@@ -297,11 +291,15 @@ go build ./cmd/notesync-core
 
 ```bash
 notesync init      # Initialize Notesync inside your Obsidian vault
-notesync auth      # Authenticate with Notion
-notesync status    # Check the current synchronization state
-notesync diff      # Preview changes before applying them
-notesync sync      # Run a synchronization
+notesync auth      # Authenticate with Notion (token stored in OS keyring)
+notesync parent    # Set the Notion parent page for new notes
+notesync scan      # Discover Markdown notes in the vault
+notesync pages     # Discover Notion pages and link them by title
+notesync create    # Create Notion pages for notes not yet linked
+notesync sync      # Synchronize both directions
 ```
+
+> Notesync commands are run from **inside your Obsidian vault** — the folder containing `.notesync/`.
 
 ---
 
@@ -311,22 +309,27 @@ notesync sync      # Run a synchronization
 | ------- | ----------- |
 | `notesync init` | Initialize a Notesync configuration |
 | `notesync auth` | Configure Notion authentication |
+| `notesync logout` | Remove stored Notion credentials |
+| `notesync parent` | Set the Notion parent page for new notes |
+| `notesync scan` | Discover Markdown notes in the vault |
+| `notesync pages` | Discover Notion pages and link them to vault notes |
+| `notesync create` | Create Notion pages for notes not yet linked |
 | `notesync status` | Display synchronization status |
-| `notesync diff` | Show changes that would be synchronized |
+| `notesync diff` | Show changes that would be synchronized (read-only) |
 | `notesync push` | Push local Obsidian changes to Notion |
 | `notesync pull` | Pull remote Notion changes into Obsidian |
 | `notesync sync` | Synchronize both directions |
 | `notesync sync --dry-run` | Preview synchronization without modifying data |
+| `notesync sync --delete` | Propagate deletions (archive pages / trash files) |
 | `notesync conflicts` | List unresolved synchronization conflicts |
-| `notesync resolve` | Interactively resolve conflicts |
+| `notesync resolve` | Interactively resolve conflicts (keep local / remote / merge) |
 | `notesync history` | Display previous synchronization operations |
-| `notesync watch` | Watch the vault and synchronize automatically |
 
 ---
 
 ## 🔄 Synchronization Model
 
-Notesync does not simply compare file timestamps. Each synchronized note maintains state representing the relationship between its local and remote versions.
+Notesync does not simply compare file timestamps. Each synchronized note maintains state representing the relationship between its local and remote versions. **Each side is compared against its own last-synced baseline** — never local directly against remote — which keeps detection stable even though Markdown ↔ Notion round-trips are not byte-identical.
 
 ```mermaid
 flowchart LR
@@ -351,7 +354,7 @@ This lets Notesync distinguish between normal updates and genuine conflicts.
 
 ## ⚠️ Conflict Resolution
 
-Conflicts occur when the same note changes independently on both sides.
+Conflicts occur when the same note changes independently on both sides. When Notesync can't safely decide, it **records the conflict and touches neither version** — nothing is overwritten.
 
 ```text
 ⚠ Conflict detected
@@ -366,18 +369,18 @@ Remote changes:
   Added database schema section
 ```
 
-Notesync offers interactive resolution:
+Run `notesync resolve` for interactive resolution:
 
 ```text
 ? How should this conflict be resolved?
 
-❯ Keep local
-  Keep remote
-  Merge
-  Skip
+❯ Merge — combine both (markers if they overlap)
+  Keep local — overwrite Notion
+  Keep remote — overwrite local file
+  Skip — decide later
 ```
 
-The goal is to make synchronization **safe and explicit** rather than silently overwriting your data.
+**Three-way merge** uses the last-synced content as a base. Non-overlapping edits merge cleanly; overlapping edits are written with Git-style `<<<<<<<` / `=======` / `>>>>>>>` markers for you to resolve by hand. The goal is to make synchronization **safe and explicit** rather than silently overwriting your data.
 
 ---
 
@@ -393,9 +396,9 @@ flowchart TD
     MODEL --> MF["Markdown Files"]
 ```
 
-**Supported Markdown features will include:**
+**Supported Markdown features:**
 
-`Headings` · `Paragraphs` · `Bold / Italic` · `Links` · `Lists` · `Ordered lists` · `Code blocks` · `Blockquotes` · `Checklists` · `Horizontal rules` · `Tables` · `Images` · `Basic Obsidian syntax where practical`
+`Headings` · `Paragraphs` · `Bold / Italic` · `Strikethrough` · `Inline code` · `Links` · `Bullet lists` · `Ordered lists` · `Checklists` · `Code blocks` · `Blockquotes` · `Horizontal rules`
 
 ---
 
@@ -405,7 +408,8 @@ Notesync stores synchronization metadata locally using SQLite:
 
 ```text
 .notesync/
-└── state.db
+├── state.db          # sync state, conflicts, history
+└── trash/            # soft-deleted local files
 ```
 
 The schema is organized around a central `NOTE` entity: a `CONFIGURATION` contains many notes, each note **tracks** one `SYNC STATE`, and **has** conflicts and sync-history records.
@@ -437,6 +441,7 @@ erDiagram
         string local_path
         string title
         string notion_page_id
+        bool deleted
         datetime created_at
         datetime updated_at
     }
@@ -445,6 +450,7 @@ erDiagram
         string local_hash
         string remote_hash
         string last_synced_hash
+        string last_synced_content
         string sync_status
         bool local_deleted
         bool remote_deleted
@@ -476,9 +482,9 @@ erDiagram
 
 **CONFIGURATION** — `id` · `vault_path` · `notion_parent_id` · `sync_mode` · `created_at`
 
-**NOTE** — `id` · `local_path` · `title` · `notion_page_id` · `created_at` · `updated_at`
+**NOTE** — `id` · `local_path` · `title` · `notion_page_id` · `deleted` · `created_at` · `updated_at`
 
-**SYNC STATE** — `id` · `local_hash` · `remote_hash` · `last_synced_hash` · `sync_status` · `local_deleted` · `remote_deleted` · `last_synced_at`
+**SYNC STATE** — `id` · `local_hash` · `remote_hash` · `last_synced_hash` · `last_synced_content` · `sync_status` · `local_deleted` · `remote_deleted` · `last_synced_at`
 
 **CONFLICT** — `id` · `local_hash` · `remote_hash` · `status` · `resolution` · `detected_at` · `resolved_at`
 
@@ -494,13 +500,13 @@ SQLite lets Notesync maintain reliable local state without requiring a separate 
 
 Security is a core requirement of Notesync.
 
-- 🔑 Authentication credentials are **never** stored directly in the repository or configuration files.
-- 🗝️ The project uses the operating system's secure credential storage where available.
+- 🔑 The Notion token is stored in the **OS credential store** (Windows Credential Manager · macOS Keychain · Linux Secret Service) — never in the repo or config files.
+- 🗝️ The token is validated against Notion **before** being saved; an invalid token never touches the keyring.
 - 📎 Configuration files reference credentials rather than storing raw secrets.
 
 **Sensitive information is never written to:**
 
-`Git repositories` · `Logs` · `SQLite history` · `Error messages` · `Terminal output`
+`Git repositories` · `Logs` · `SQLite state` · `Error messages` · `Terminal output`
 
 ---
 
@@ -529,13 +535,11 @@ Covers CLI commands, configuration, argument parsing, user interaction logic, an
 go test ./...
 ```
 
-Covers sync algorithms, change detection, hashing, conflict detection, Markdown conversion, Notion mapping, SQLite persistence, and file operations.
+Covers sync algorithms, change detection, hashing, conflict detection, three-way merge, Markdown conversion, Notion mapping, SQLite persistence, and file operations.
 
 </th>
 </tr>
 </table>
-
-Integration tests verify complete synchronization flows.
 
 ---
 
@@ -543,20 +547,19 @@ Integration tests verify complete synchronization flows.
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/notesync.git
+git clone https://github.com/Mazennaji/notesync.git
 cd notesync
 
-# Install & build the CLI
+# Build the CLI
+cd cli
 npm install
 npm run build
+cd ..
 
 # Build the Go core
 cd core
-go build ./cmd/notesync-core
-
-# Run tests
-npm test
-cd core && go test ./...
+go build -o notesync-core ./cmd/notesync-core
+cd ..
 ```
 
 ---
@@ -580,59 +583,59 @@ Releases use **GoReleaser** to produce platform-specific binaries.
 
 ## 🗺️ Roadmap
 
+<details>
+<summary><b>Phase 1 — Foundation ✅</b></summary>
+
+- [x] Repository setup
+- [x] TypeScript CLI
+- [x] Go core
+- [x] CLI ↔ Go communication
+- [x] Configuration
+- [x] SQLite state
+- [x] Obsidian vault discovery
+
+</details>
+
+<details>
+<summary><b>Phase 2 — Notion Integration ✅</b></summary>
+
+- [x] Notion authentication
+- [x] Notion API client
+- [x] Page discovery
+- [x] Page creation
+- [x] Page updates
+- [x] Block conversion
+
+</details>
+
+<details>
+<summary><b>Phase 3 — Synchronization ✅</b></summary>
+
+- [x] Change detection
+- [x] Content hashing
+- [x] Push
+- [x] Pull
+- [x] Bidirectional sync
+- [x] Deletion handling
+- [x] Dry-run mode
+
+</details>
+
+<details>
+<summary><b>Phase 4 — Conflict Management ✅</b></summary>
+
+- [x] Conflict detection
+- [x] Conflict storage
+- [x] Interactive resolution
+- [x] Three-way merge support
+- [x] Conflict history
+
+</details>
+
 <details open>
-<summary><b>Phase 1 — Foundation</b></summary>
+<summary><b>Phase 5 — Developer Experience 🚧</b></summary>
 
-- [ ] Repository setup
-- [ ] TypeScript CLI
-- [ ] Go core
-- [ ] CLI ↔ Go communication
-- [ ] Configuration
-- [ ] SQLite state
-- [ ] Obsidian vault discovery
-
-</details>
-
-<details>
-<summary><b>Phase 2 — Notion Integration</b></summary>
-
-- [ ] Notion authentication
-- [ ] Notion API client
-- [ ] Page discovery
-- [ ] Page creation
-- [ ] Page updates
-- [ ] Block conversion
-
-</details>
-
-<details>
-<summary><b>Phase 3 — Synchronization</b></summary>
-
-- [ ] Change detection
-- [ ] Content hashing
-- [ ] Push
-- [ ] Pull
-- [ ] Bidirectional sync
-- [ ] Deletion handling
-- [ ] Dry-run mode
-
-</details>
-
-<details>
-<summary><b>Phase 4 — Conflict Management</b></summary>
-
-- [ ] Conflict detection
-- [ ] Conflict storage
-- [ ] Interactive resolution
-- [ ] Three-way merge support
-- [ ] Conflict history
-
-</details>
-
-<details>
-<summary><b>Phase 5 — Developer Experience</b></summary>
-
-- [ ] Sync history
+- [x] Sync history
 - [ ] Watch mode
 - [ ] Improved terminal UI
 - [ ] Detailed diagnostics
@@ -646,7 +649,7 @@ Releases use **GoReleaser** to produce platform-specific binaries.
 
 - [ ] Additional note providers
 - [ ] Plugin architecture
-- [ ] Advanced Markdown support
+- [ ] Advanced Markdown support (tables, images)
 - [ ] Git-aware workflows
 - [ ] Remote synchronization state
 - [ ] TypeScript SDK
@@ -696,8 +699,8 @@ This project is licensed under the **MIT License** — see [`LICENSE`](LICENSE) 
 
 ## 🚧 Status
 
-> **Notesync is currently under active development.**
-> The architecture and APIs may change before the first stable release.
+> **Notesync has a working MVP.** Phases 1–4 are complete: setup, Notion integration, full bidirectional synchronization, and conflict management (including three-way merge). Phase 5 (developer-experience polish — watch mode, shell completions, packaged releases) is in progress.
+>
 > The project is being built with a focus on correctness, safety, developer experience, and maintainability.
 
 ---
