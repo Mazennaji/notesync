@@ -308,6 +308,26 @@ func (s *Store) SetRemoteDeleted(noteID int64) error {
 	return err
 }
 
+func (s *Store) RecordSyncContent(noteID int64, content string) error {
+	_, err := s.DB.Exec(
+		`UPDATE sync_state SET last_synced_content = ? WHERE note_id = ?`,
+		content, noteID,
+	)
+	return err
+}
+
+func (s *Store) BaseContent(noteID int64) (string, error) {
+	var c sql.NullString
+	err := s.DB.QueryRow(
+		`SELECT last_synced_content FROM sync_state WHERE note_id = ?`,
+		noteID,
+	).Scan(&c)
+	if err != nil {
+		return "", nil
+	}
+	return c.String, nil
+}
+
 func (s *Store) LogHistory(noteID int64, operation, direction, status, localHash, remoteHash, errMsg string) error {
 	_, err := s.DB.Exec(
 		`INSERT INTO sync_history
@@ -319,6 +339,16 @@ func (s *Store) LogHistory(noteID int64, operation, direction, status, localHash
 }
 
 func (s *Store) RecordConflict(noteID int64, localHash, remoteHash string) error {
+	var n int
+	if err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM conflict WHERE note_id = ? AND status = 'unresolved'`,
+		noteID,
+	).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
 	_, err := s.DB.Exec(
 		`INSERT INTO conflict (note_id, local_hash, remote_hash, status)
 		 VALUES (?, ?, ?, 'unresolved')`,
@@ -366,24 +396,4 @@ func (s *Store) CountUnresolvedConflicts() (int, error) {
 	var n int
 	err := s.DB.QueryRow(`SELECT COUNT(*) FROM conflict WHERE status = 'unresolved'`).Scan(&n)
 	return n, err
-}
-
-func (s *Store) RecordSyncContent(noteID int64, content string) error {
-	_, err := s.DB.Exec(
-		`UPDATE sync_state SET last_synced_content = ? WHERE note_id = ?`,
-		content, noteID,
-	)
-	return err
-}
-
-func (s *Store) BaseContent(noteID int64) (string, error) {
-	var c sql.NullString
-	err := s.DB.QueryRow(
-		`SELECT last_synced_content FROM sync_state WHERE note_id = ?`,
-		noteID,
-	).Scan(&c)
-	if err != nil {
-		return "", nil
-	}
-	return c.String, nil
 }
