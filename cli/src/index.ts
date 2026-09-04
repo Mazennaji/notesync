@@ -13,6 +13,7 @@ import { syncCommand } from "./commands/sync.js";
 import { conflictsCommand } from "./commands/conflicts.js";
 import { resolveCommand } from "./commands/resolve.js";
 import { historyCommand } from "./commands/history.js";
+import { watchCommand } from "./commands/watch.js";
 
 const program = new Command();
 
@@ -98,5 +99,10 @@ program.command("history")
   .description("Show previous synchronization operations")
   .option("-n, --limit <number>", "How many entries to show", "20")
   .action(historyCommand);
+
+program.command("watch")
+  .description("Watch the vault and synchronize automatically")
+  .option("-i, --interval <seconds>", "Also poll Notion every N seconds for remote changes")
+  .action(watchCommand);
 
 program.parse();
