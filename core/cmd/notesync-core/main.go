@@ -818,6 +818,39 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 
 		return ipc.Response{OK: true, Data: map[string]any{"merged": true, "clean": true}}
 
+	case "history.list":
+		cfg, err := decodeConfig(req.Config)
+		if err != nil {
+			return ipc.Response{OK: false, Error: "bad config: " + err.Error()}
+		}
+		limit := int(toFloat(req.Args["limit"]))
+		if limit <= 0 {
+			limit = 20
+		}
+		store, err := storage.Open(filepath.Join(cfg.VaultPath, ".notesync", "state.db"))
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+		defer store.Close()
+
+		entries, err := store.RecentHistory(limit)
+		if err != nil {
+			return ipc.Response{OK: false, Error: err.Error()}
+		}
+
+		var out []map[string]string
+		for _, e := range entries {
+			out = append(out, map[string]string{
+				"note":      e.LocalPath,
+				"operation": e.Operation,
+				"direction": e.Direction,
+				"status":    e.Status,
+				"error":     e.ErrorMsg,
+				"at":        e.CreatedAt,
+			})
+		}
+		return ipc.Response{OK: true, Data: map[string]any{"entries": out}}
+
 	default:
 		return ipc.Response{OK: false, Error: "unknown command: " + req.Command}
 	}
