@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Bidirectional sync between Notion and Obsidian",
   "type": "module",
-  "bin": { "notesync": "./dist/index.js" },
+  "bin": {
+    "notesync": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
@@ -11,6 +13,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.7.0",
+    "chokidar": "^5.0.0",
     "commander": "^12.0.0"
   },
   "devDependencies": {
