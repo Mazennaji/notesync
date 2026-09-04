@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { callCore } from "./core/client.js";
 import { initCommand } from "./commands/init.js";
 import { authCommand, scanCommand } from "./commands/scan.js";
-import { loadConfig, configExists } from "./config/loader.js"
+import { loadConfig, configExists } from "./config/loader.js";
 import { pagesCommand } from "./commands/pages.js";
 import { parentCommand } from "./commands/parent.js";
 import { createCommand } from "./commands/create.js";
@@ -21,14 +21,51 @@ const program = new Command();
 program
   .name("notesync")
   .description("Bidirectional sync between Notion and Obsidian")
-  .version("0.1.0");
+  .version("0.1.0")
+  .option("--verbose", "Show internal core logs")
+  .hook("preAction", (thisCommand) => {
+    if (thisCommand.opts().verbose) {
+      process.env.NOTESYNC_VERBOSE = "1";
+    }
+  });
 
-program.command("init").description("Initialize a Notesync configuration")
+program.command("init")
+  .description("Initialize a Notesync configuration")
   .action(initCommand);
+
 program.command("auth")
   .description("Configure Notion authentication")
   .action(authCommand);
-program.command("status").description("Display synchronization status")
+
+program.command("logout")
+  .description("Remove stored Notion credentials")
+  .action(async () => {
+    const res = await callCore({ command: "auth.logout" });
+    if (!res.ok) {
+      console.error(res.error);
+      process.exit(1);
+    }
+    console.log("Logged out. Notion token removed.");
+  });
+
+program.command("parent")
+  .description("Set the Notion parent page for new notes")
+  .action(parentCommand);
+
+program.command("scan")
+  .description("Discover Markdown notes in the vault")
+  .action(scanCommand);
+
+program.command("pages")
+  .description("Discover Notion pages and link them to vault notes")
+  .action(pagesCommand);
+
+program.command("create")
+  .description("Create Notion pages for notes not yet linked")
+  .action(createCommand);
+
+program.command("status")
+  .description("Display synchronization status")
   .action(async () => {
     const vaultPath = process.cwd();
     if (!(await configExists(vaultPath))) {
@@ -40,53 +77,38 @@ program.command("status").description("Display synchronization status")
       command: "status",
       config: config as unknown as Record<string, unknown>,
     });
-    if (!res.ok) { console.error(res.error); process.exit(1); }
-    const d = res.data as { vaultPath: string; syncMode: string; notes: number };
-    console.log(`Vault:  ${d.vaultPath}`);
-    console.log(`Mode:   ${d.syncMode}`);
-    console.log(`Notes:  ${d.notes}`);
+    if (!res.ok) {
+      console.error(res.error);
+      process.exit(1);
+    }
+    const d = res.data as {
+      vaultPath: string;
+      syncMode: string;
+      notes: number;
+      linked: number;
+    };
+    console.log(`  Vault:  ${d.vaultPath}`);
+    console.log(`  Mode:   ${d.syncMode}`);
+    console.log(`  Notes:  ${d.notes} (${d.linked} linked to Notion)`);
   });
-program.command("sync")
-  .description("Synchronize both directions")
-  .option("--dry-run", "Preview changes without applying them")
-  .option("--delete", "Propagate deletions (archive pages / trash files)")
-  .action(syncCommand);
-
-program.command("scan")
-  .description("Discover Markdown notes in the vault")
-  .action(scanCommand);
-
-program.command("logout")
-  .description("Remove stored Notion credentials")
-  .action(async () => {
-    const res = await callCore({ command: "auth.logout" });
-    if (!res.ok) { console.error(res.error); process.exit(1); }
-    console.log("Logged out. Notion token removed.");
-  });
-
-program.command("pages")
-  .description("Discover Notion pages and link them to vault notes")
-  .action(pagesCommand);
-
-program.command("parent")
-  .description("Set the Notion parent page for new notes")
-  .action(parentCommand);
-
-program.command("create")
-  .description("Create Notion pages for notes not yet linked")
-  .action(createCommand);
-  
-program.command("push")
-  .description("Push local note content to Notion")
-  .action(pushCommand);
 
 program.command("diff")
   .description("Show what would be synchronized (read-only)")
   .action(diffCommand);
 
+program.command("push")
+  .description("Push local note content to Notion")
+  .action(pushCommand);
+
 program.command("pull")
   .description("Pull note content from Notion into the vault")
   .action(pullCommand);
+
+program.command("sync")
+  .description("Synchronize both directions")
+  .option("--dry-run", "Preview changes without applying them")
+  .option("--delete", "Propagate deletions (archive pages / trash files)")
+  .action(syncCommand);
 
 program.command("conflicts")
   .description("List unresolved synchronization conflicts")
@@ -105,14 +127,6 @@ program.command("watch")
   .description("Watch the vault and synchronize automatically")
   .option("-i, --interval <seconds>", "Also poll Notion every N seconds for remote changes")
   .action(watchCommand);
-
-program
-  .option("--verbose", "Show internal core logs")
-  .hook("preAction", (thisCommand) => {
-    if (thisCommand.opts().verbose) {
-      process.env.NOTESYNC_VERBOSE = "1";
-    }
-  });
 
 program.command("completion")
   .description("Output shell completion script (bash, zsh, powershell)")
