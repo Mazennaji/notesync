@@ -105,4 +105,12 @@ program.command("watch")
   .option("-i, --interval <seconds>", "Also poll Notion every N seconds for remote changes")
   .action(watchCommand);
 
+program
+  .option("--verbose", "Show internal core logs")
+  .hook("preAction", (thisCommand) => {
+    if (thisCommand.opts().verbose) {
+      process.env.NOTESYNC_VERBOSE = "1";
+    }
+  });
+
 program.parse();
