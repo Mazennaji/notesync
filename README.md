@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🔄 Notesync
+<img src="assets/logo.png" width="140" alt="Notesync logo" />
+
+# Notesync
 
 ### Your notes, wherever you work.
 
@@ -51,13 +53,11 @@ flowchart TD
 | 🗑️ **Deletion handling** | Soft-delete both sides; opt-in propagation | ✅ |
 | 🗃️ **Local state** | Persisted in SQLite | ✅ |
 | 📜 **Sync history** | Full audit of past operations | ✅ |
+| 👀 **Watch mode** | Automatic sync on file changes | ✅ |
 | 🔐 **Secure auth** | Notion token stored in the OS credential store | ✅ |
 | 🖥️ **Cross-platform** | Linux · macOS · Windows | ✅ |
 | 🚀 **Native core** | Fast Go engine with a friendly TypeScript CLI | ✅ |
-| 👀 **Watch mode** | Automatic sync on file changes | 🚧 |
 | 🧩 **Modular** | Architecture designed for future providers | ✅ |
-
-<sub>✅ implemented · 🚧 planned</sub>
 
 ---
 
@@ -179,6 +179,7 @@ The diagram below maps each CLI command to the underlying operations it triggers
 | Push Changes | Detect Changes · Convert Markdown ↔ Blocks · Store Sync State | Notion API · Obsidian Vault |
 | Pull Changes | Detect Changes · Convert Markdown ↔ Blocks · Store Sync State | Notion API · Obsidian Vault |
 | Resolve Conflicts | Detect Conflicts · Three-way Merge · Store Sync State | Notion API · Obsidian Vault |
+| Watch Vault | Synchronize Notes (on change) | Notion API · Obsidian Vault |
 | Check Status / View History | — | — |
 
 ---
@@ -205,6 +206,7 @@ The diagram below maps each CLI command to the underlying operations it triggers
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/typescript/typescript-original.svg" width="16"/> CLI | TypeScript / Node.js |
 | ⚡ CLI Framework | Commander.js |
 | 🎨 Terminal UX | @clack/prompts |
+| 👀 File Watching | chokidar |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/markdown/markdown-original.svg" width="16"/> Markdown | Goldmark |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/sqlite/sqlite-original.svg" width="16"/> Database | SQLite (modernc.org/sqlite, pure Go) |
 | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/notion/notion-original.svg" width="16"/> Remote API | Notion API |
@@ -242,12 +244,15 @@ notesync/
 │   │   ├── auth/               # OS keyring
 │   │   ├── config/
 │   │   └── ipc/
+│   ├── .goreleaser.yaml
 │   ├── go.mod
 │   └── go.sum
 │
 ├── docs/
 │   └── architecture/
 │
+├── .github/workflows/
+├── assets/
 ├── LICENSE
 └── README.md
 ```
@@ -324,6 +329,10 @@ notesync sync      # Synchronize both directions
 | `notesync conflicts` | List unresolved synchronization conflicts |
 | `notesync resolve` | Interactively resolve conflicts (keep local / remote / merge) |
 | `notesync history` | Display previous synchronization operations |
+| `notesync watch` | Watch the vault and synchronize automatically |
+| `notesync watch -i <seconds>` | Also poll Notion every N seconds for remote changes |
+| `notesync completion` | Output a shell completion script (bash / zsh / powershell) |
+| `notesync --verbose <command>` | Run any command with internal core logs shown |
 
 ---
 
@@ -408,6 +417,7 @@ Notesync stores synchronization metadata locally using SQLite:
 
 ```text
 .notesync/
+├── config.json       # vault path, Notion parent, sync mode
 ├── state.db          # sync state, conflicts, history
 └── trash/            # soft-deleted local files
 ```
@@ -573,7 +583,7 @@ flowchart LR
     PR["Pull Request"] --> TS["TypeScript Tests"] --> GT["Go Tests"] --> B["Build"] --> V["Cross-platform Validation"]
 ```
 
-Releases use **GoReleaser** to produce platform-specific binaries.
+Tagged releases (`v*`) trigger **GoReleaser** to build platform-specific binaries and attach them to a GitHub release.
 
 | Platforms | Architectures |
 | :--- | :--- |
@@ -636,17 +646,18 @@ Releases use **GoReleaser** to produce platform-specific binaries.
 <summary><b>Phase 5 — Developer Experience 🚧</b></summary>
 
 - [x] Sync history
-- [ ] Watch mode
-- [ ] Improved terminal UI
-- [ ] Detailed diagnostics
-- [ ] Shell completions
-- [ ] Cross-platform releases
+- [x] Watch mode
+- [x] Improved terminal UI
+- [x] Detailed diagnostics (`--verbose`)
+- [x] Shell completions
+- [x] Cross-platform releases (GoReleaser config + workflow)
 
 </details>
 
 <details>
 <summary><b>Future</b></summary>
 
+- [ ] Published npm package with bundled binaries
 - [ ] Additional note providers
 - [ ] Plugin architecture
 - [ ] Advanced Markdown support (tables, images)
@@ -699,9 +710,9 @@ This project is licensed under the **MIT License** — see [`LICENSE`](LICENSE) 
 
 ## 🚧 Status
 
-> **Notesync has a working MVP.** Phases 1–4 are complete: setup, Notion integration, full bidirectional synchronization, and conflict management (including three-way merge). Phase 5 (developer-experience polish — watch mode, shell completions, packaged releases) is in progress.
+> **Notesync has a working MVP.** All five phases are functionally complete — setup, Notion integration, full bidirectional synchronization, conflict management with three-way merge, and developer-experience tooling (watch mode, history, diagnostics, shell completions, and a GoReleaser-based release pipeline).
 >
-> The project is being built with a focus on correctness, safety, developer experience, and maintainability.
+> The project is built with a focus on correctness, safety, developer experience, and maintainability.
 
 ---
 
