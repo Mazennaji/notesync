@@ -775,6 +775,12 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		if err != nil {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
+
+		base, _ := store.BaseContent(noteID)
+		if base == "" {
+			return ipc.Response{OK: false, Error: "no base version recorded for this note — merge needs a prior clean sync. Use keep-local or keep-remote instead."}
+		}
+
 		localBytes, err := os.ReadFile(filepath.Join(cfg.VaultPath, filepath.FromSlash(note.LocalPath)))
 		if err != nil {
 			return ipc.Response{OK: false, Error: err.Error()}
@@ -783,7 +789,6 @@ func dispatch(req ipc.Request, logger *slog.Logger) ipc.Response {
 		if err != nil {
 			return ipc.Response{OK: false, Error: err.Error()}
 		}
-		base, _ := store.BaseContent(noteID)
 
 		result := sync.Merge(base, string(localBytes), remoteMD)
 
