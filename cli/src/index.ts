@@ -12,6 +12,7 @@ import { pullCommand } from "./commands/pull.js";
 import { syncCommand } from "./commands/sync.js";
 import { conflictsCommand } from "./commands/conflicts.js";
 import { resolveCommand } from "./commands/resolve.js";
+import { historyCommand } from "./commands/history.js";
 
 const program = new Command();
 
@@ -92,5 +93,10 @@ program.command("conflicts")
 program.command("resolve")
   .description("Interactively resolve conflicts")
   .action(resolveCommand);
+
+program.command("history")
+  .description("Show previous synchronization operations")
+  .option("-n, --limit <number>", "How many entries to show", "20")
+  .action(historyCommand);
 
 program.parse();
